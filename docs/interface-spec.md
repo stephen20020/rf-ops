@@ -1,7 +1,8 @@
-# RF Ops interface spec — v3
+# RF Ops interface spec — v3.1
 
-**Status:** v3 (Nov 2026). Supersedes v2. Resolves the second independent review's 17 blockers and
-records its other decisions (§23).
+**Status:** v3.1 (Nov 2026). Supersedes v2.
+- v3 resolved the second independent review's 17 blockers (§23).
+- v3.1 resolves the third review's 9 blockers (§24).
 
 **Builds on:**
 - the build audit (`docs/ux-audit.md`);
@@ -176,7 +177,11 @@ Security detail is in `docs/hosting-and-security.md` §Security 2–6.
   - guest replacements.
 
   They overlay the plot without editing it.
-- **Alerts** belong to a device (or a TX/receiver) and record the holder and song at raise.
+- **Alerts** belong to a device (or a TX/receiver) and record the holder(s) and song at raise.
+- **Song visits:** every song change is a visit. Going back to a song replays its passes.
+- **Unusable devices** (suspect, out, missing) are never handed to anyone. A later planned use
+  raises a conflict one song ahead instead.
+- **Mix belongs to the IEM TX.** A pack moved to another TX hears that TX's mix.
 - **Battery evidence** counts for a show only if recorded at or after that show's call time
   − 2 h.
 - **Events** carry an IANA time zone. Every time is shown in it.
@@ -383,7 +388,9 @@ The owner is the first of:
 
   > "RX3 and RX6 are also on TX1. Same problem there?" [Yes, likely TX1] [No, just RX1]
 
-  "Yes" re-points the alert to TX1 and flags all three packs.
+  "Yes" re-points the alert to TX1 and flags all three packs. A TX alert goes to the zones of
+  everyone holding a pack on that TX. Its fix is a **TX swap** (Lead or FOH): "Move RX1, RX3 and
+  RX6 to spare TX9 (retune packs)". The FOH card shows the ME change.
 
 ### 7.5 Sound and vibration
 
@@ -551,6 +558,14 @@ for 10 s. The card's hint line names the physical act: "Hand it over, then tap D
        conflict WARNING: "Tan needed for Judah at Song 5; Red still out" [Find another]
        [Give Judah a different mic] [Tell FOH].
   3. **Same receiver unit** as the failed one: labelled "same receiver" (acceptable, flagged).
+  - **IEM packs:** candidates on the **same TX** come first. A spare on another TX is offered as
+    either:
+    - "RX9 — **retune to TX1**", which keeps the mix (sync the pack to TX1 before handing it
+      over); or
+    - "RX9 on TX9 — hears *Console mix*", which says on the FOH card that the ME source
+      changes.
+
+    "Pack only — no console change" appears only when the TX is unchanged or retuned.
   4. **Other form factor** (handheld ↔ bodypack/headset): a third tier, flagged "different mic
      type — tell FOH".
 - **Capsule fix.** If a spare capsule or headset of the right type is in stock, the panel shows
@@ -590,8 +605,15 @@ The button text is the full action: **"Swap Helen: Red → Bpack3 (Ch 43)"**.
      - "Helen moving **Ch 34 → Ch 43** (Bpack3)."
      - "ME-1: direct-out of Ch 43 needed on Helen's ME slot."
      - "Wait for **In hand** before unmuting."
-2. **In hand:** the A2 taps **In hand** when the spare is on the performer. The FOH card turns
-   amber: "In hand. Unmute Ch 43 / mute Ch 34". FOH can act on comms before this if needed.
+2. **In hand:** the A2 taps **In hand** when the spare is on the performer and the failed device
+   is back in their hand.
+   - **This step records the physical move** (Bpack3 → Helen, Red → stock).
+   - Until then, neither device appears in the handoff lists; the swap card is the only
+     instruction.
+   - The FOH card turns amber: "In hand. Unmute Ch 43 / mute Ch 34". FOH can act on comms before
+     this if needed.
+   - **Pull:** the tile reads "Pulled — mute Ch 34" at once. Collecting Red waits until the song
+     ends: "Collect Red from Helen" appears as a Coming-up card.
 3. **FOH confirmed:** FOH taps **Done at console**. Backstage sees "FOH ✓ 0:08". If not confirmed
    within 30 s of In hand, FOH gets a WARNING.
 
@@ -610,8 +632,13 @@ Ch 43."
 
 - **Undo:** allowed until In hand. After In hand, use "Reverse swap", which creates a new FOH card
   ("Swap reversed: Ch 43 → Ch 34").
-- **Return:** when Red is back in service, its panel offers **Return Helen to Red**, which runs the
-  same two-step flow.
+- **Return:** when Red is back in service (**Mark fixed**), its panel offers **Return Helen to
+  Red**.
+  - It runs the same two steps; its In hand records Red → Helen and Bpack3 → stock.
+  - Later planned holders of Red get it back as normal handoffs.
+- **Unusable device planned later.** While Red is suspect, any later song that plans Red for
+  someone not covered by the swap raises, one song ahead: "Red is suspect but planned for Judah
+  at Song 6" [Extend the swap to Judah] [Pick a spare] [Mark Red fixed].
 
 ---
 
@@ -719,8 +746,10 @@ The list is editable; defaults:
   - **Add guest device:** type, label, owner, and for IEM which TX/mix it listens to.
   - It exists for this show only and appears in the board's Guest section.
   - **Replace** (a guest substitution): "Chandler uses his own pack instead of RX9" moves
-    Chandler's remaining RX9 cells to the guest device. RX9 becomes Done, with no battery alert.
-  - Labels are show-scoped, so "Chandler's pack" can exist on both days.
+    only **Chandler's** remaining RX9 cells to the guest device. If nobody else uses RX9 later, it
+    becomes Done, with no battery alert.
+  - A guest device lasts the whole event (Friday and Saturday) and its label is unique within the
+    event. **Return to owner** at count-in records that it went home.
 
 ---
 
@@ -1028,15 +1057,21 @@ Automated in Rust and Playwright unless marked (manual). Thresholds are pass/fai
     - Every endpoint except the listed public ones returns 401 without a session (GET and the WS
       included).
     - A join code works on 3 devices, then fails; it fails after 2 h.
-    - 5 wrong PINs lock that name on that device only.
+    - 5 wrong PINs lock that name on that device (429), while another device still signs in.
+    - 20 wrong PINs from rotating device ids pause the name on new devices; a device that signed
+      in before still gets in.
+    - 20 wrong join codes in 5 min pause joining.
     - A screen credential survives 8 days while in show mode.
     - Revocation takes effect on the next request.
 21. **Headers.** CSP, HSTS, `frame-ancestors`, Origin rejection on a cross-site WS upgrade.
 22. **Touch.** Wall targets ≥ 64 px; phone primary ≥ 48 px; Done/Problem ≥ 64 px (DOM measurement).
 23. **Contrast.** Text ≥ 4.5:1; wall primary and alert ≥ 7:1 (automated contrast audit).
 24. **Reliability.** All requirements in `docs/reliability.md` §4.
-25. **Migration.** The current HF 2026 database migrates to v3 with an identical per-song
-    effective assignment for every performer and song, and Helen/Shosh becomes one pass.
+25. **Migration.** The current HF 2026 database migrates to v3.1 (`docs/data-model.md` §5):
+    - every performer and song without a pass keeps an identical effective assignment;
+    - Helen/Shosh becomes one pass, with phase-0 holder Helen and post-pass holder Shosh (the
+      old effective holder);
+    - the migration report lists old rest-of-show swaps and per-kit mix differences.
 26. **Volunteer test (manual).** A first-time helper, with the 3-card intro only, completes:
     battery service for their section, a give, a pass, and a Problem report, without help.
 27. **Crew review (manual).** Two A2s and the FOH engineer run the practice show before the first
@@ -1092,12 +1127,14 @@ Automated in Rust and Playwright unless marked (manual). Thresholds are pass/fai
    - join codes and screen credentials;
    - per-name/device rate limits, Origin checks, headers and CSP;
    - hashed agent key;
-   - R2 upload and the fencing lease;
-   - `render.yaml`.
-2. **Data model v3:** devices, plot cells, passes, substitutions, holdings, events/time zone,
-   evidence window, practice scope, operators/screens, plus migration 0005 from today's schema.
-   - Core functions: planned, handoffs, usage, conflicts.
-   - Tests: Helen/Shosh, MIDI jump, rest-of-show, carry-over.
+   - R2 upload, generation-prefixed keys and the fencing lease;
+   - `render.yaml` and the Cloudflare Worker proxy.
+2. **Data model v3.1:**
+   - Tables: devices, show bases (mix), plot cells, visits, passes + marks, substitutions (all
+     kinds), holdings, events/time zone, evidence window, practice scope.
+   - Migration 0006 from today's schema, with its report.
+   - Core functions: planned (phases), handoffs, usage, unusable devices, conflicts, after show.
+   - Tests: every scenario in the third review (a–l) and §20.7–20.13, §20.25.
 3. **Shared UI:** status bar, song strip (hold-to-advance), activity line + undo, alert
    column/strip + critical band, device tile, device panel, problem presets.
 4. **Wall board,** next handoffs and battery service.
@@ -1139,7 +1176,7 @@ changes.
 | 11 | Practice show could touch real data | Scope on holdings, checks, alerts, substitutions; MIDI ignored; never active (data model §4) |
 | 12 | Venue internet down, phones on cellular | "Venue screens offline" banner, FOH-confirm-pending, one NOTE (reliability §3.4) |
 | 13 | Cues lost while the agent was disconnected | Last-cue buffer; < 10 s applies, else Song check (reliability §3.5) |
-| 14 | Standby had split-brain risk and logged everyone out | Cloudflare proxied CNAME flip + R2 fencing lease + shared signing key + client replay (reliability §3.3, §3.6) |
+| 14 | Standby had split-brain risk and logged everyone out | Cloudflare Worker origin flip + R2 fencing lease + shared signing key + client replay (reliability §3.3, §3.6; revised in §24 B8) |
 | 15 | Retention didn't fit the disk | 5 GB disk; 20 local automatic backups + 30-day pinned; R2 long-term; 25 % / 10 % thresholds (reliability §2.2) |
 | 16 | Times without a time zone | `events.timezone`; UTC storage; display in event zone (data model §2) |
 | 17 | Battery checks from the afternoon counted for the evening | Evidence valid only from call − 2 h (§8.1) |
@@ -1172,3 +1209,39 @@ changes.
 | 40 | Verb labels and hint lines | §9.1 |
 | 41 | dLive "copy processing" line | §10.5 |
 | 42 | Measurable tests | §20 |
+
+---
+
+## 24. v3 → v3.1 change log (third independent review)
+
+### Blockers (all resolved)
+
+| # | Finding | Resolution |
+|---|---|---|
+| B1 | The Helen/Shosh migration contradicted its own test | Passes are made before cells, and pass pairs are skipped; the test checks phase-0 and post-pass holders (data model §5 steps 4–5, §20.25) |
+| B2 | Substitutions and passes didn't compose (failed RX10 handed to Shosh; a post-pass swap did nothing) | Phases per song; a substitution moves the device's whole pass chain in that song, matching any phase holder (data model §3.1) |
+| B3 | Pass state was per song, not per visit | `song_visits` + `pass_marks(pass, visit)`; going back replays passes; jumped passes are derived, not stored (data model §2.3, §2.5, §3.5) |
+| B4 | The swap and the handoff list both wrote the same holding | Substitution steps own the holdings (In hand / Return); their devices are left out of the handoff lists while recorded (data model §2.6; §10.5) |
+| B5 | A rest-of-show replacement overwrote another performer's cell | Overlay never overwrites; conflict instead. A2 **reassign** substitution resolves it without a plot edit (data model §3.1, §3.7) |
+| B6 | A suspect device was still handed to its next planned holder | Unusable devices are never handed out; one-song-ahead conflict with Extend / Pick spare / Mark fixed (data model §3.6; §10.6) |
+| B7 | TX failure couldn't be expressed; pack swaps silently changed the mix | `tx_swap` substitution; retune option; mix belongs to the TX (`show_bases`); multi-holder alerts and routing (data model §2.2, §2.6, §3.10; §7.4, §10.2) |
+| B8 | Standby could fence the good server; epoch ambiguity; Render domain move | Standby always starts fenced; lease generation separate from the epoch; If-Match takeover; fenced services stop uploads; generation-prefixed backups; Worker origin flip; takeover checks the PIN against the downloaded backup; runbook suspends the old service first (reliability §3.6) |
+| B9 | Brute force by rotating device ids; join codes unlimited | Per-name limit across devices + trusted-device budget; global join budget 20 / 5 min; limits before argon2, 2 concurrent hashes. Built and tested (`tests/security.rs`) |
+
+### Decisions adopted
+
+| # | Decision | Where |
+|---|---|---|
+| 1 | Migration mappings (status, day, NULL call, nullable base, Lead label, holdings via old handoff plan, old rest-of-show flagged) | data model §5 |
+| 2 | If no Lead has a PIN after migration or restore, the env admin is upserted | data model §5 step 10 |
+| 3 | Departed-visit passes aren't carried over; Now covers them | data model §3.5 |
+| 4 | Guest: performer = the guest; event-scoped guest labels; holder "owner" | data model §2.2, §2.6, §2.7 |
+| 5 | After-show target = the linked same-day show's first song; "Keep with X"; count-in excludes kept devices; pre-show Now is empty | data model §3.3, §3.9 |
+| 6 | Evidence window = max(call − 2 h, the previous linked show's end) | data model §2.9 |
+| 7 | Pull: Pulled at once; the collect waits for the song boundary | data model §2.6; §10.5 |
+| 8 | Practice: per-scope equipment status; Playback only when no real show is live; no push; doesn't keep sessions alive; included in backups | data model §4 |
+| 9 | Show-mode keep-alive only for cookies valid at show start, with absolute caps; sockets re-check every 10 s | data model §2.10 (built) |
+| 10 | Backup + R2 upload immediately after any sign-in change; takeover verifies the PIN against the downloaded backup | reliability §3.6 (backup built) |
+| 11 | Worker proxy instead of a Render domain move; suspend the old service first | reliability §3.6, hosting |
+| 12 | Persistent cookies; re-admit by a new code; 3 uses explained | data model §2.10, hosting §Security 3 |
+| 13 | Screens can never hold the Lead role | data model §2.10, hosting §Security 4 (built) |

@@ -156,35 +156,54 @@ presence.
 **Setup:**
 - Two Render services from one Blueprint: `rfops` (active) and `rfops-standby` (suspended), each
   with its own disk.
-- Cloudflare DNS: `rfops.<domain>` is a **proxied CNAME** to the active service's
-  `*.onrender.com` host. A proxied record changes within seconds (I, Cloudflare docs).
+- **Traffic goes through a Cloudflare Worker** on `rfops.<domain>/*`. It forwards every request,
+  WebSockets included, to the host named in its `ORIGIN` variable (`rfops.onrender.com` normally).
+  - Flipping `ORIGIN` takes effect within seconds.
+  - Render needs no custom-domain move or new certificate. Render routes by Host header, so
+    moving a custom domain between services means removing it, re-adding it and waiting for a
+    certificate. That is too slow and uncertain for a show.
+  - The Worker adds nothing else: no caching, no rewriting.
 - Both services share:
-  - `RFOPS_SESSION_KEY`, so signed session cookies stay valid across takeover;
-  - the R2 credentials and bucket.
+  - `RFOPS_SESSION_KEY`, so cookies stay valid;
+  - `RFOPS_PUBLIC_ORIGIN`;
+  - the R2 credentials.
 
-**Fencing lease in R2** (`lease.json`: `{epoch, holder, renewed_at}`):
-- The active service renews it every 15 s with a **conditional PUT** (`If-Match: <etag>`).
-- When a service starts, it reads the lease:
-  - holder is another service and `renewed_at` < 60 s ago → it starts **fenced** (read-only,
-    "This is the standby").
-  - Otherwise it takes the lease.
-- When a renewal finds the etag changed and a **higher epoch**, the service **fences itself**:
-  writes refused (503 "standby took over"), sockets closed, and clients reload onto the DNS
-  name.
-- If R2 is unreachable, the service keeps serving. The lease is only a guard against two
-  writers, and Cloudflare sends traffic to one origin.
+**Lease** (R2 object `lease.json` = `{generation, holder, renewed_at}`):
+- R2 supports conditional `PutObject` with `If-Match` / `If-None-Match`, evaluated atomically,
+  and returns 412 to the loser (V: developers.cloudflare.com/r2/api/s3/api/).
+- `generation` is the lease's own counter, separate from the DB epoch.
+- `holder` = `RFOPS_INSTANCE` (`active` | `standby`).
+
+| Rule | Behaviour |
+|---|---|
+| Active at start | Takes the lease only if `holder` = itself, or `renewed_at` is older than 60 s. Otherwise it starts **fenced** |
+| Standby at start | **Always starts fenced.** Only **Take over** writes its lease |
+| Renewal | Every 15 s, `If-Match` the etag it last wrote |
+| **Fence test** | A renewal gets 412 and the lease now names another holder → fence at once |
+| Fenced | Writes are refused with 503 "standby took over", R2 uploads stop, and sockets close with reason `fenced` |
+| R2 unreachable | Keep serving and keep retrying. After 60 s without a successful renewal, a WARNING on /health. The runbook's first step (suspend the old service) is the real guard |
+| Backup keys | `g<generation>/auto/…` and `g<generation>/pinned/…`. Restore picks the newest backup of the **highest generation**, so a fenced or stale instance's backups can never be chosen |
 
 **Runbook** (a Lead, not a developer; target < 10 min, drilled once before the event):
-1. Render → `rfops-standby` → **Resume**.
-2. Open `https://rfops-standby.onrender.com/#/takeover`. Sign in as Lead with PIN, then tap
+1. Render → `rfops` → **Suspend**, if Render shows it running. This guarantees the old
+   instance is gone.
+2. Render → `rfops-standby` → **Resume**. It starts fenced.
+3. Open `https://rfops-standby.onrender.com/#/takeover`. Enter the Lead's name and PIN, then tap
    **Take over**. The standby:
-   - downloads the newest verified R2 backup;
+   - downloads the newest verified backup of the highest generation from R2;
    - runs `quick_check`;
-   - writes the lease with epoch + 1;
-   - unfences itself.
-3. Cloudflare → DNS → `rfops` CNAME → change the target to the standby host. Proxied, so seconds.
-4. Clients reconnect, see the new epoch, and replay their acked commands (§3.3).
-5. **Fail back** only after the show: the same steps in reverse.
+   - **checks the name and PIN against that backup's users** (its own disk may be empty);
+   - writes the lease (`If-Match` the etag it read; generation + 1);
+   - writes a new DB epoch;
+   - unfences.
+4. Cloudflare → Workers → `rfops-proxy` → set `ORIGIN` to `rfops-standby.onrender.com`.
+5. Clients reconnect, see the new epoch, and replay their acked commands (§3.3).
+6. **Fail back** only after the show: the same steps in reverse.
+
+**Sign-in data across a takeover.**
+- Any revocation, PIN change or join-code change triggers an immediate backup and R2 upload
+  [have: backup; R2 upload in step 1b].
+- The newest backup therefore already contains it, and a revoked session can't come back.
 
 ## 4. Requirements (testable)
 
@@ -246,8 +265,13 @@ presence.
     - server RSS growth < 10 %;
     - kiosk JS heap growth < 20 %.
 26. **Standby.**
-    - Fencing tests against an S3 mock: a service starting with a fresh lease held by another
-      starts fenced; a renewal seeing a higher epoch fences and refuses writes.
+    - Fencing tests against an S3 mock:
+      - the standby always starts fenced;
+      - the active starts fenced when the lease is fresh and held by the standby;
+      - a renewal that gets 412 with another holder fences and refuses writes;
+      - two concurrent takeovers end with exactly one winner;
+      - restore picks the highest generation.
+    - Takeover refuses a wrong PIN (checked against the downloaded backup).
     - A drilled takeover in < 10 min (manual, once before the event).
 27. **Health detail (Lead only)** shows:
     - uptime, epoch, version, DB quick_check, WAL size, free disk %;
@@ -283,7 +307,7 @@ presence.
   - `--disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding`
   - a dedicated `--user-data-dir`.
 - Memory Saver off.
-- Enrolled with a **screen credential** (interface spec §1.3).
+- Enrolled with a **screen credential** (interface spec §1.1).
 
 **iPad as the wall:**
 - Auto-Lock Never, on a charger, Low Power off.

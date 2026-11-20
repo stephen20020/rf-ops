@@ -74,10 +74,11 @@ Full detail is in `docs/reliability.md` §2.2 and §3.6.
 
 **Standby (D7, cloud form):**
 - A second Render service, `rfops-standby`, is in the Blueprint and kept suspended.
-- A fencing **lease** object in R2 (epoch and holder, renewed with conditional PUT) guarantees
-  only one service accepts writes.
-- Cloudflare serves `rfops.<domain>` as a **proxied** CNAME, so moving it to the standby takes
-  seconds.
+- A fencing **lease** object in R2 (generation and holder, renewed with conditional PUT) makes
+  sure only one service accepts writes. The standby always starts fenced.
+- A small **Cloudflare Worker** on `rfops.<domain>` forwards to whichever Render service its
+  `ORIGIN` variable names. Changing that variable moves everyone in seconds, with no Render
+  domain or certificate change.
 - Both services share the session-signing key, so nobody has to sign in again.
 - Clients replay commands acknowledged in the last 15 min, which recovers the gap since the last
   backup.
@@ -109,23 +110,37 @@ sessions, screens).
      Home-Screen apps keep their own cookies, separate from Safari: a helper who scanned in
      Safari and then added the icon must type the code again in the app.
    - The kiosk QR is shown only for 60 s after a Lead enters their PIN.
+   - A helper who is locked out mid-show (cookie dropped, code used up) is re-admitted with a new
+     code from the Lead (Admin → People → Join code).
    - **Re-issue all helper codes** invalidates every outstanding code.
 4. **Screens (wall, FOH):**
    - Enrolled by a Lead with a named **screen credential**: 7 days, sliding, revocable, and never
      expiring while a show is in show mode.
    - Actions are attributed "Wall", or "Wall (Sam)" when someone tapped their name chip in the
      last 5 min.
-5. **Sessions:**
+   - Screen roles are a2, foh or viewer, **never Lead**. Lead-only actions need a Lead signed in
+     with their own PIN.
+5. **Sessions** [have]:
    - **Signed, stateless cookies:** HMAC with `RFOPS_SESSION_KEY`, shared by active and standby.
-     They are `HttpOnly; Secure; SameSite=Strict`.
-   - 18 h sliding, and never expiring while in show mode.
-   - Revocation is a DB list of revoked session IDs plus per-user `sessions_valid_after`.
-6. **Rate limits:**
-   - **Sign-in:** 5 failures per 5 min **per name and per device ID**, then lockout with backoff.
-   - **Per IP:** only a 100 failures / 5 min cap that raises a WARNING. It never locks out,
-     because the whole crew shares the venue's single public IP.
+     They are persistent (`Max-Age`), `HttpOnly; Secure; SameSite=Strict`.
+   - 18 h sliding for people, 7 days for screens.
+   - A cookie valid when show mode started is accepted until show mode ends, with an absolute
+     cap of 7 days from sign-in (screens 30 days).
+   - **Revocation:** a list of revoked session ids, plus per-user `sessions_valid_after` (set by
+     a PIN change or "sign out everywhere"). Open WebSockets re-check every 10 s.
+6. **Rate limits** (checked before any argon2 work; at most 2 argon2 checks run at once) [have]:
+   - **Name + device:** 5 wrong PINs in 5 min lock that name on that device for 5 min.
+   - **Name, any device:** device ids are chosen by the client, so this limit stops rotation.
+     20 wrong PINs in an hour from devices that never signed in as that name pause the name for
+     15 min on new devices, and the Lead gets a WARNING.
+   - **Trusted devices:** a browser holding a valid `rfops_device` cookie for that name (it signed
+     in before) keeps its own budget of 10 per hour. An attacker can't lock the real person out.
+   - **Per IP:** a 100 failures / 5 min counter raises a WARNING. It never locks out, because the
+     whole crew shares the venue's single public IP.
+   - **Join codes:** 6 digits, ≤ 3 uses, 2 h. 5 wrong codes in 5 min per device, plus a
+     **global** budget of 20 wrong codes per 5 min, past which joining pauses for 15 min and the
+     Lead is warned.
    - **API:** per-session limits.
-   - **Join codes:** 6 digits, ≤ 3 uses, 2 h, with the same failure limits.
 7. **Roles** are enforced on the server for every mutation, with read scoping:
    - helpers see only their zone tasks;
    - viewers can't see PINs, keys or sessions;
@@ -173,11 +188,14 @@ To do with the owner's accounts:
    - `RFOPS_SESSION_KEY` (shared)
    - `RFOPS_TZ` (e.g. America/Chicago)
    - `RFOPS_PUBLIC_ORIGIN` (`https://rfops.<domain>`)
+   - `RFOPS_INSTANCE` (`active` on `rfops`, `standby` on `rfops-standby`)
    - R2 endpoint, bucket, key and secret
    - VAPID keys
 3. **Cloudflare:**
-   - DNS: a **proxied** CNAME `rfops.<domain>` → the active service's onrender.com host. Add the
-     custom domain in Render.
+   - Deploy the `rfops-proxy` Worker (`deploy/cloudflare/worker.js`) with a route
+     `rfops.<domain>/*` and the variable `ORIGIN=rfops.onrender.com`.
+   - The Workers free plan allows 100k requests a day. A show day is far below that (one request
+     per API call, one per WebSocket), but check the usage after the first rehearsal.
    - SSL mode **Full (strict)**.
 4. **R2:**
    - Create a private bucket, plus an API token scoped to it.
