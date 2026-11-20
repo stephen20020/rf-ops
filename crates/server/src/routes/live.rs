@@ -72,6 +72,7 @@ pub struct Snapshot {
     alerts: Vec<Alert>,
     open_checkouts: Vec<Checkout>,
     show: Option<ShowSnapshot>,
+    midi: crate::routes::midi::MidiStatus,
 }
 
 #[derive(Debug, Deserialize)]
@@ -171,6 +172,7 @@ async fn snapshot(
         alerts,
         open_checkouts,
         show,
+        midi: crate::routes::midi::current_status(&s, false).await?,
     }))
 }
 

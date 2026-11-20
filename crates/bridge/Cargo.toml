@@ -1,0 +1,12 @@
+[package]
+name = "rfops-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Forwards MIDI cues from MultiTracks Playback to the RF Ops server"
+
+[dependencies]
+rfops-core = { path = "../core" }
+midir = "0.10"
+ureq = { version = "2.12", default-features = false, features = ["json"] }
+serde_json.workspace = true

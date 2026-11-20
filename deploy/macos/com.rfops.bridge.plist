@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  RF Ops MIDI bridge on the Playback Mac: starts at login, restarts if it stops.
+  Replace RFOPS_HOME (rf-ops folder), RFOPS_SERVER (e.g. http://192.168.1.10:8080) and
+  RFOPS_BRIDGE_KEY (Admin → MIDI). See docs/operations.md.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.rfops.bridge</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>RFOPS_HOME/target/release/rfops-bridge</string>
+    <string>--name</string><string>Playback Mac</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>RFOPS_SERVER</key><string>RFOPS_SERVER</string>
+    <key>RFOPS_BRIDGE_KEY</key><string>RFOPS_BRIDGE_KEY</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/rfops-bridge.log</string>
+  <key>StandardErrorPath</key><string>/tmp/rfops-bridge.log</string>
+</dict>
+</plist>

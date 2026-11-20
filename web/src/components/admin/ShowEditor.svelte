@@ -123,7 +123,7 @@
           <li class:skipped={s.skipped} class:current={s.id === show.show.current_song_id}>
             <span class="grow">{s.title}</span>
             <label class="pc" title="MIDI Program Change value that selects this song">PC
-              <input type="number" min="0" max="127" value={pcValue(s.midi_trigger)} onchange={(e) => { const v = (e.currentTarget as HTMLInputElement).value; store.act(() => patch(`/api/songs/${s.id}`, { midi_trigger: v === '' ? null : { type: 'program_change', channel: 16, value: Number(v) } })); }} />
+              <input type="number" min="0" max="127" value={pcValue(s.midi_trigger)} onchange={(e) => { const v = (e.currentTarget as HTMLInputElement).value; store.act(() => patch(`/api/songs/${s.id}`, { midi_trigger: v === '' ? null : { type: 'program_change', channel: store.snapshot?.midi.channel ?? 16, value: Number(v) } })); }} />
             </label>
             <button class="ghost" onclick={() => move(i, -1)} disabled={i === 0} aria-label="Move up">↑</button>
             <button class="ghost" onclick={() => move(i, 1)} disabled={i === store.songs.length - 1} aria-label="Move down">↓</button>

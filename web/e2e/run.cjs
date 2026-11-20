@@ -280,6 +280,48 @@ async function timed(fn) {
     await p.goto(`${base}/#/backstage`);
   });
 
+  await test('MIDI: Playback cue moves every screen in < 1 s; lock and follow', async () => {
+    const k = await (await fetch(`${base}/api/midi/key`, { method: 'POST', headers: { 'x-rfops-actor': 'Admin', 'content-type': 'application/json' }, body: '{}' })).json();
+    const send = (value) =>
+      fetch(`${base}/api/midi`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-rfops-bridge-key': k.key },
+        body: JSON.stringify({ bridge: 'Playback Mac', port: 'RF Ops', messages: [[0xcf, value]] }),
+      }).then((r) => r.json());
+    // PC 3 on channel 16 = "Song 2" in the demo.
+    const ms = await timed(async () => {
+      const r = await send(3);
+      assert.deepEqual(r.outcomes, ['→ Song 2']);
+      for (const c of [back, foh]) await c.page.getByTestId('current-song').filter({ hasText: /^Song 2$/ }).waitFor({ timeout: 1000 });
+    });
+    assert.ok(ms < 1000, `took ${ms} ms`);
+    await back.page.getByTestId('midi-status').filter({ hasText: 'Following Playback' }).waitFor({ timeout: 1000 });
+
+    // Lock from the backstage screen: Playback cues are ignored, manual still works.
+    await back.page.getByTestId('midi-toggle').click();
+    await foh.page.getByTestId('midi-status').filter({ hasText: 'MIDI locked' }).waitFor({ timeout: 1000 });
+    const locked = await send(5);
+    assert.match(locked.outcomes[0], /^LOCKED/);
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal((await back.page.getByTestId('current-song').textContent()).trim(), 'Song 2');
+
+    await back.page.getByTestId('midi-toggle').click();
+    await back.page.getByTestId('midi-status').filter({ hasText: 'Following Playback' }).waitFor({ timeout: 1000 });
+    await new Promise((r) => setTimeout(r, 550)); // past the duplicate window
+    await send(5);
+    await foh.page.getByTestId('current-song').filter({ hasText: 'Song 4' }).waitFor({ timeout: 1000 });
+  });
+
+  await test('MIDI: simulate from Admin, monitor shows it', async () => {
+    const admin = await client(browser, base, 'Admin', '#/admin', { width: 1440, height: 900 });
+    await admin.page.getByRole('tab', { name: 'MIDI' }).click();
+    await admin.page.getByTestId('bridge-state').filter({ hasText: 'Online' }).waitFor({ timeout: 3000 });
+    await admin.page.getByTestId('simulate-song').first().click(); // PC 1 = Walk-in / Welcome
+    await back.page.getByTestId('current-song').filter({ hasText: 'Walk-in' }).waitFor({ timeout: 1000 });
+    await admin.page.getByTestId('midi-monitor').getByText('simulated by Admin').first().waitFor({ timeout: 2000 });
+    await admin.ctx.close();
+  });
+
   await test('no page errors in any client', async () => {
     assert.deepEqual([...back.errors, ...foh.errors, ...right.errors], []);
   });

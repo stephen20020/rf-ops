@@ -5,8 +5,9 @@
   import ShowEditor from '../components/admin/ShowEditor.svelte';
   import AssignmentGrid from '../components/admin/AssignmentGrid.svelte';
   import DataTools from '../components/admin/DataTools.svelte';
+  import MidiSetup from '../components/admin/MidiSetup.svelte';
 
-  const TABS = ['Assignments', 'Show & kits', 'Inventory', 'People', 'Data'] as const;
+  const TABS = ['Assignments', 'Show & kits', 'MIDI', 'Inventory', 'People', 'Data'] as const;
   type Tab = (typeof TABS)[number];
   let tab = $state<Tab>('Assignments');
 
@@ -32,6 +33,8 @@
     <Inventory />
   {:else if tab === 'People'}
     <People />
+  {:else if tab === 'MIDI'}
+    <MidiSetup />
   {:else if tab === 'Data'}
     <DataTools />
   {:else if tab === 'Show & kits'}

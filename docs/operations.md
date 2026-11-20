@@ -91,7 +91,63 @@ iPad: open the URL in Safari, choose Share → Add to Home Screen, then lock it 
 Each screen remembers its operator and show. Set a PIN for each operator (Admin → People), so a
 shared screen can't act as someone else.
 
-## 5. Before every service
+## 5. MIDI from MultiTracks Playback
+
+RF Ops can follow Playback: when a song starts, every screen moves to that song. A small bridge
+runs on the Playback Mac and forwards Playback's MIDI cues over the network.
+
+**One-time setup on the Playback Mac** (Rust installed, `rf-ops` cloned):
+
+```bash
+cd ~/rf-ops && cargo build --release -p rfops-bridge
+```
+
+Get the bridge key from Admin → MIDI → "Show the bridge key" (admins only), then test it by
+hand:
+
+```bash
+~/rf-ops/target/release/rfops-bridge --server http://192.168.1.10:8080 --key <bridge key>
+```
+
+The bridge creates a MIDI destination called **RF Ops**.
+
+- **In Playback:** set **MIDI Out** to **RF Ops**. MIDI Out requires the MultiTracks Cloud
+  subscription.
+- **In Playback, per song:** add a MIDI cue at the start, Program Change *N* on **channel 16**
+  (the default). In RF Ops, Admin → MIDI → **Number 1, 2, 3…** numbers the setlist to match, or
+  type a number per song.
+- **Check it:** Admin → MIDI shows the bridge as **Online**, and the **MIDI monitor** lists each
+  cue and what it did.
+
+Prefer the IAC bus or the PlayAUDIO1U instead? Run `rfops-bridge --list` to see the inputs, then
+add `--port "IAC Driver Bus 1"` (or part of the name).
+
+**Start the bridge automatically at login:**
+
+```bash
+sed -e "s#RFOPS_HOME#$HOME/rf-ops#g" -e "s#RFOPS_SERVER#http://192.168.1.10:8080#" -e "s#RFOPS_BRIDGE_KEY#<bridge key>#" ~/rf-ops/deploy/macos/com.rfops.bridge.plist > ~/Library/LaunchAgents/com.rfops.bridge.plist
+```
+
+```bash
+launchctl load -w ~/Library/LaunchAgents/com.rfops.bridge.plist
+```
+
+The log is `/tmp/rfops-bridge.log`.
+
+**How it behaves:**
+
+- **Which show follows Playback:** the show in **show mode**, otherwise the latest rehearsal.
+- **Follow / Lock:** every song bar has a MIDI status and a **Lock MIDI** button. Locked, cues are
+  ignored but logged. ◀ ▶ always work, locked or not.
+- **Repeats:** the same cue repeated within half a second counts once.
+- **Unknown cues:** a Program Change on the cue channel that matches no song (for example, a
+  skipped song) raises a warning and doesn't move anything.
+- **Bridge lost:** if the bridge is silent for 10 s during show mode, a "MIDI bridge offline"
+  warning appears. It clears when the bridge returns. Meanwhile, advance songs by hand.
+- **Optional next/previous notes:** Admin → MIDI can also map a note to "next song" and
+  "previous song".
+
+## 6. Before every service
 
 1. Admin → Show & kits: duplicate last week's show, or import the show file, and set the call time.
 2. Admin → Assignments: fix any red cells.
@@ -103,25 +159,27 @@ shared screen can't act as someone else.
    - raises automatic alerts for packs in use that are unchecked, overdue or low. These clear
      when someone logs a check.
 
-## 6. During the show
+## 7. During the show
 
 - **Mic fails:** tap the alert's **⇄ Swap** (or the performer's card), then **Swap to spare**,
   then tap the spare. Three taps. FOH gets a banner: "Maya now on Ch 9 (was Ch 2)". The failed
   pack is marked faulty unless you untick it.
+- **Song changes:** these follow Playback automatically when the bridge is running; ◀ ▶ on any
+  screen always work. **Lock MIDI** if Playback goes off-script.
 - **Song order changes:** ◀ ▶ on any screen. Skipped songs (Admin → Show & kits → Skip) drop out
   of the handoff list.
 - **A screen shows "Offline":** it has stopped receiving updates, and edits are blocked so nothing
   is lost silently. It reconnects by itself. If the server machine went down, restart the service.
   Every screen catches up when it returns.
 
-## 7. After the show
+## 8. After the show
 
 - Admin → Data → **Post-show report**: alerts with response times, swaps, faulty gear, battery
   checks and song changes. Print it or save it as PDF.
 - Switch the show back to rehearsal.
 - Pull the faulty gear listed in the report.
 
-## 8. Backups and restore
+## 9. Backups and restore
 
 Backups are written to `data/backups/` (next to the database):
 
@@ -147,7 +205,7 @@ launchctl load -w ~/Library/LaunchAgents/com.rfops.server.plist
 
 Also copy `data/backups/` to another drive now and then.
 
-## 9. Moving data in and out
+## 10. Moving data in and out
 
 Admin → Data:
 

@@ -23,7 +23,7 @@ export interface Performer {
 }
 export interface Show {
   id: Id; name: string; starts_at: string | null; call_time: string | null;
-  current_song_id: Id | null; mode: 'setup' | 'rehearsal' | 'show';
+  current_song_id: Id | null; mode: 'setup' | 'rehearsal' | 'show'; midi_mode: 'follow' | 'lock';
 }
 export interface Song {
   id: Id; show_id: Id; position: number; title: string; midi_trigger: string | null; skipped: boolean;
@@ -78,7 +78,7 @@ export interface ShowSnapshot {
 }
 export interface Snapshot {
   seq: number; server_time: string; users: User[]; performers: Performer[]; equipment: Equipment[];
-  shows: Show[]; alerts: Alert[]; open_checkouts: Checkout[]; show: ShowSnapshot | null;
+  shows: Show[]; alerts: Alert[]; open_checkouts: Checkout[]; show: ShowSnapshot | null; midi: MidiStatus;
 }
 
 export interface ServerEvent {
@@ -104,4 +104,14 @@ export interface Report {
   faulty_items: { id: Id; label: string; kind: string; model: string; notes: string }[];
   song_changes: { at: string; actor: string; song: string | null; source: string | null }[];
   handoffs_done: number;
+}
+
+export type MidiTrigger =
+  | { type: 'program_change'; channel: number; value: number }
+  | { type: 'control_change'; channel: number; controller: number; value: number }
+  | { type: 'note_on'; channel: number; note: number };
+export interface MidiStatus {
+  bridge: { name: string; port: string | null; ports: string[]; online: boolean; last_seen_at: string } | null;
+  recent: { at: string; source: string; message: string; outcome: string }[];
+  channel: number; next_trigger: MidiTrigger | null; prev_trigger: MidiTrigger | null; target_show_id: Id | null;
 }

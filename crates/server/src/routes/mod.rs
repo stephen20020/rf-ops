@@ -2,6 +2,7 @@ mod auth;
 mod data;
 pub(crate) mod inventory;
 mod live;
+pub(crate) mod midi;
 pub(crate) mod ops;
 mod showops;
 pub(crate) mod shows;
@@ -21,6 +22,7 @@ pub fn router() -> Router<AppState> {
         .merge(auth::router())
         .merge(showops::router())
         .merge(data::router())
+        .merge(midi::router())
 }
 
 async fn health() -> Json<Value> {

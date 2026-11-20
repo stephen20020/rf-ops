@@ -2,6 +2,7 @@ pub mod backup;
 pub mod db;
 pub mod error;
 pub mod hub;
+pub mod midi;
 mod routes;
 pub mod rules;
 pub mod seed;
@@ -20,6 +21,7 @@ use hub::Hub;
 pub struct AppState {
     pub pool: SqlitePool,
     pub hub: Arc<Hub>,
+    pub midi: midi::Shared,
     /// Where backups go; `None` disables backups (in-memory databases).
     pub backup_dir: Option<PathBuf>,
 }
@@ -34,9 +36,17 @@ impl AppState {
             hub.clone(),
             Duration::from_secs(15),
         ));
+        midi::ensure_key(&pool).await?;
+        let midi_state: midi::Shared = Arc::new(std::sync::Mutex::new(midi::MidiState::new()));
+        tokio::spawn(midi::watchdog(
+            pool.clone(),
+            midi_state.clone(),
+            hub.clone(),
+        ));
         Ok(Self {
             pool,
             hub,
+            midi: midi_state,
             backup_dir: None,
         })
     }

@@ -3,6 +3,7 @@
 pub mod alert;
 pub mod assign;
 pub mod battery;
+pub mod midi;
 pub mod model;
 
 pub use model::*;

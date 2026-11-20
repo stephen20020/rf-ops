@@ -4,10 +4,11 @@ Backstage wireless mic & IEM operations system: equipment, performer assignments
 checkout/return, battery checks, and alerts — shared live between backstage A2s and FOH on a local
 network, with no internet required.
 
-Status: **Phase 3 (show-ready manual operation)**. Backstage wall/phone, FOH and Admin screens share
+Status: **Phase 4 (MIDI from Playback)** on top of Phase 3 (show-ready manual operation). Backstage wall/phone, FOH and Admin screens share
 state in real time; 3-tap swap to spare with FOH banner, PIN sign-in, show-mode lock, automatic
-battery alerts, backups, CSV/show import-export, post-show report. Hardware integrations (MIDI,
-Shure, Sennheiser) come next. Install and show-day procedures: [`docs/operations.md`](docs/operations.md). See [`docs/BRIEF.md`](docs/BRIEF.md) for the full
+battery alerts, backups, CSV/show import-export, post-show report; songs follow MultiTracks
+Playback via the `rfops-bridge` MIDI bridge, with Follow/Lock. Shure and Sennheiser telemetry
+come next. Install and show-day procedures: [`docs/operations.md`](docs/operations.md). See [`docs/BRIEF.md`](docs/BRIEF.md) for the full
 plan and [`docs/requirements.md`](docs/requirements.md) for the venue's known setup and open questions.
 
 ## Layout
@@ -17,6 +18,7 @@ plan and [`docs/requirements.md`](docs/requirements.md) for the venue's known se
 | `crates/core` | Pure domain logic — assignment overlay, conflicts, handoffs, battery rules, alert lifecycle. No I/O. |
 | `crates/server` | Axum HTTP API + SQLite (sqlx). Every mutation writes an `event_log` row in the same transaction; a broadcaster pushes new events to WebSocket clients. |
 | `web` | Svelte 5 + TypeScript client (Backstage, FOH, Admin), served by the server from `web/dist`. |
+| `crates/bridge` | `rfops-bridge`: runs on the Playback Mac, creates the "RF Ops" MIDI destination, forwards cues. |
 | `docs/` | Brief, research, requirements. |
 
 ## Run
@@ -127,6 +129,11 @@ alerts, PIN sign-in, and the post-show report. It needs Playwright with Chromium
 | `POST /api/shows/{id}/advance` | Next / previous non-skipped song |
 | `POST /api/shows/{id}/handoffs/done` | Tick / untick a handoff |
 | `PUT /api/shows/{id}/assignments/cell` | Set one assignment-grid cell atomically |
+| `POST /api/midi`, `POST /api/midi/heartbeat` | Bridge ingest / heartbeat (`x-rfops-bridge-key`) |
+| `POST /api/midi/simulate` | Send a MIDI message as if from Playback |
+| `GET /api/midi/status`, `PUT /api/midi/settings` | Bridge state + monitor; cue channel, next/prev notes |
+| `POST /api/midi/key`, `POST /api/midi/key/rotate` | Show / replace the bridge key (admin) |
+| `POST /api/shows/{id}/midi-mode` | `follow` or `lock` |
 | `POST /api/shows/{id}/swap` | Swap a performer to another kit (song / rest of show), optional mark faulty |
 | `GET /api/shows/{id}/report` | Post-show report data |
 | `POST /api/login`, `POST /api/logout`, `PUT /api/users/{id}/pin` | PIN sign-in |

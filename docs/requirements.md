@@ -12,7 +12,7 @@ Living document. Confirmed facts come from the owner; everything else is marked 
 | IEM | 3× **Sennheiser SR IEM G4** (300 series), Ethernet confirmed | Transmitter status via Sennheiser ew G4 Media Control Protocol, UDP 53212 (Phase 5b). EK pack battery never available. |
 | Guitar wireless | 2× **Shure GLXD6 (Z2, 2.4 GHz)**, 1× **Shure GLXD6+ (Z3, dual band)** | None — manual only |
 | Console | Allen & Heath **dLive DM64 + S7000** | Optional read-only link via dLive MIDI-over-TCP (Phase 7) |
-| Playback | MultiTracks Playback on a **MacBook** (macOS version TBD), **iConnectivity PlayAUDIO1U** | MIDI via RF Ops bridge on the Mac (Phase 4) |
+| Playback | MultiTracks Playback on a **MacBook** (macOS version TBD), **iConnectivity PlayAUDIO1U** | `rfops-bridge` on the Mac: virtual "RF Ops" MIDI port → server. Default cues: Program Change per song on ch 16, follow automatically. **Needs a real test with Playback.** |
 | Network | Dante and control on the **same network** | — |
 
 ## Console system (from the HF 2026 dLive system plan, Nov 2026)

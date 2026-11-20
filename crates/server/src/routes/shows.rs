@@ -58,6 +58,8 @@ pub struct Show {
     pub call_time: Option<String>,
     pub current_song_id: Option<i64>,
     pub mode: String,
+    /// "follow" (MIDI moves the current song) or "lock" (MIDI ignored).
+    pub midi_mode: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
