@@ -1,5 +1,6 @@
-// HTTP client: adds operator/client headers and an idempotency key per command, and retries
-// network failures with the same key so a command is never applied twice.
+// HTTP client. Identity is the signed session cookie set by the server at sign-in; this adds the
+// device id and an idempotency key per command, and retries network failures with the same key
+// so a command is never applied twice.
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -31,23 +32,32 @@ function sessionValue(key: string, make: () => string): string {
 
 export const clientId = sessionValue('rfops.client', () => `web-${uid().slice(0, 8)}`);
 
-let operator = '';
-let token = '';
-export function setOperator(name: string) {
-  operator = name;
+/** Stable per browser (sign-in lockouts are per name and device). */
+function localValue(key: string, make: () => string): string {
+  try {
+    const v = localStorage.getItem(key);
+    if (v) return v;
+    const n = make();
+    localStorage.setItem(key, n);
+    return n;
+  } catch {
+    return make();
+  }
 }
-export function setToken(t: string) {
-  token = t;
-}
-/** Called when the server says this operator must sign in with a PIN. */
+export const deviceId = localValue('rfops.device', () => `dev-${uid().slice(0, 12)}`);
+
+/** Called when the server says the session ended (signed out, expired, revoked). */
 let onUnauthorized: (() => void) | null = null;
 export function handleUnauthorized(fn: () => void) {
   onUnauthorized = fn;
 }
 
 export async function get<T>(path: string): Promise<T> {
-  const res = await fetch(path, { headers: { accept: 'application/json' } });
-  if (!res.ok) throw new ApiError(res.status, await errorText(res));
+  const res = await fetch(path, { headers: { accept: 'application/json' }, credentials: 'same-origin' });
+  if (!res.ok) {
+    if (res.status === 401) onUnauthorized?.();
+    throw new ApiError(res.status, await errorText(res));
+  }
   return res.json() as Promise<T>;
 }
 
@@ -70,12 +80,11 @@ export async function send<T = unknown>(method: 'POST' | 'PATCH' | 'PUT' | 'DELE
     try {
       res = await fetch(path, {
         method,
+        credentials: 'same-origin',
         headers: {
           'content-type': 'application/json',
-          'x-rfops-actor': operator,
-          'x-rfops-client': clientId,
+          'x-rfops-client': deviceId,
           'x-rfops-idempotency-key': key,
-          ...(token ? { 'x-rfops-token': token } : {}),
         },
         body: body === undefined ? undefined : JSON.stringify(body),
       });
@@ -84,7 +93,8 @@ export async function send<T = unknown>(method: 'POST' | 'PATCH' | 'PUT' | 'DELE
       continue;
     }
     if (!res.ok) {
-      if (res.status === 401) onUnauthorized?.();
+      // A failed sign-in is also a 401, but it isn't a lost session.
+      if (res.status === 401 && !path.startsWith('/api/auth/')) onUnauthorized?.();
       throw new ApiError(res.status, await errorText(res));
     }
     if (res.status === 204) return undefined as T;
@@ -103,11 +113,10 @@ export const del = (p: string) => send('DELETE', p);
 export async function postText(path: string, body: string): Promise<{ status: number; json: any }> {
   const res = await fetch(path, {
     method: 'POST',
+    credentials: 'same-origin',
     headers: {
       'content-type': 'text/csv',
-      'x-rfops-actor': operator,
-      'x-rfops-client': clientId,
-      ...(token ? { 'x-rfops-token': token } : {}),
+      'x-rfops-client': deviceId,
     },
     body,
   });

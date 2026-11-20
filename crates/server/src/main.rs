@@ -59,8 +59,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Lead '{name}' can now sign in with that PIN.");
         return Ok(());
     }
-    // First start: the Lead comes from RFOPS_ADMIN_NAME / RFOPS_ADMIN_PIN. There is no
-    // "anyone can act" mode.
+    if seed_demo && seed::seed_demo(&pool).await? {
+        tracing::info!("demo data inserted");
+    }
+    if seed_hf2026 && seed::seed_hf2026(&pool).await? {
+        tracing::info!("HF 2026 template inserted");
+    }
+
+    // After seeding (seeds create named operators without PINs). On first start the Lead comes
+    // from RFOPS_ADMIN_NAME / RFOPS_ADMIN_PIN; there is no "anyone can act" mode.
     if !admin_exists(&pool).await? {
         match (std::env::var("RFOPS_ADMIN_NAME"), std::env::var("RFOPS_ADMIN_PIN")) {
             (Ok(name), Ok(pin)) => {
@@ -72,13 +79,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ),
         }
     }
-    if seed_demo && seed::seed_demo(&pool).await? {
-        tracing::info!("demo data inserted");
-    }
-    if seed_hf2026 && seed::seed_hf2026(&pool).await? {
-        tracing::info!("HF 2026 template inserted");
-    }
-
     let mut state = AppState::new(pool.clone())
         .await?
         .with_startup_note(startup_note);

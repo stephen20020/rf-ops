@@ -9,10 +9,10 @@
   import Report from './views/Report.svelte';
   import SwapBanner from './components/SwapBanner.svelte';
 
-  type Route = 'backstage' | 'foh' | 'admin' | 'login' | 'report';
+  type Route = 'backstage' | 'foh' | 'admin' | 'login' | 'join' | 'report';
   function parse(): Route {
     const h = location.hash.replace(/^#\/?/, '').split('?')[0];
-    return (['backstage', 'foh', 'admin', 'login', 'report'] as Route[]).includes(h as Route) ? (h as Route) : 'backstage';
+    return (['backstage', 'foh', 'admin', 'login', 'join', 'report'] as Route[]).includes(h as Route) ? (h as Route) : 'backstage';
   }
   let route = $state<Route>(parse());
   $effect(() => {
@@ -21,14 +21,14 @@
     return () => window.removeEventListener('hashchange', on);
   });
 
-  // Ask for an operator first (unless just viewing the login screen).
-  const needsLogin = $derived(store.loaded && (!store.operatorName || store.needsPin));
 </script>
 
-{#if !store.loaded}
+{#if !store.authChecked}
   <div class="loading muted">Connecting to RF Ops server…</div>
-{:else if needsLogin || route === 'login'}
+{:else if !store.me || route === 'login' || route === 'join'}
   <Login />
+{:else if !store.loaded}
+  <div class="loading muted">Loading…</div>
 {:else if route === 'report'}
   <Report />
 {:else}

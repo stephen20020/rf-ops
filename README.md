@@ -30,7 +30,7 @@ cd web && npm install && npm run build && cd ..
 ```
 
 ```bash
-cargo run -p rfops-server -- --seed-demo
+RFOPS_ADMIN_NAME=Admin RFOPS_ADMIN_PIN=246810 cargo run -p rfops-server -- --seed-demo
 ```
 
 To start from the HF 2026 console layout instead (12 colour mics on Ch 33–44, TX1–TX10), use
@@ -38,7 +38,9 @@ To start from the HF 2026 console layout instead (12 colour mics on Ch 33–44, 
 
 Open `http://<server-ip>:8080` on any device on the network. `--seed-demo` loads demo data
 (ULXD4Q receivers, XSW and G4 IEMs, GLXD guitar packs, 11 performers, an 8-segment service) only
-when the database is empty. Pick an operator on first load (e.g. *A2 Stage Left*).
+when the database is empty. Sign in as the Lead (`Admin` / `246810` above), then give each operator
+a PIN in Admin → People. Helpers get a 6-digit join code instead; wall and FOH screens are enrolled
+there too. An existing database: run `rfops-server --create-admin "Your name" 123456` once.
 
 Screens:
 
@@ -58,11 +60,15 @@ Environment variables:
 - `RFOPS_ADDR` — listen address (default `0.0.0.0:8080`)
 - `RFOPS_WEB` — built web client folder (default `web/dist`)
 - `RFOPS_BACKUP_DIR` — backup folder (default `backups/` next to the database)
+- `RFOPS_ADMIN_NAME`, `RFOPS_ADMIN_PIN` — create the first Lead if no Lead with a PIN exists
+- `RFOPS_SESSION_KEY` — session signing key, 32+ characters (production; shared with the standby)
+- `RFOPS_PUBLIC_ORIGIN` — e.g. `https://rfops.example.com` (exact Origin check, Secure cookies, HSTS)
 
-Mutating requests need an `x-rfops-actor: <operator name>` header. Until the first operator exists,
-any name may act; after that the name must match an operator, and `viewer` operators are read-only.
-Operators with a PIN must also send `x-rfops-token` from `POST /api/login`. `x-rfops-client` is
-recorded in the event log; `x-rfops-idempotency-key` makes retries safe.
+Every `/api/` request needs a session cookie from `POST /api/auth/login` (name + PIN) or
+`POST /api/auth/join` (helper code), except `/api/health`, `/api/auth/status` and the agent's
+`/api/midi` endpoints (bridge key). `viewer` operators are read-only. `x-rfops-client` (device id)
+is recorded in the event log; `x-rfops-idempotency-key` makes retries safe. Security model:
+`docs/hosting-and-security.md`.
 
 ## Test
 
@@ -136,7 +142,9 @@ alerts, PIN sign-in, and the post-show report. It needs Playwright with Chromium
 | `POST /api/shows/{id}/midi-mode` | `follow` or `lock` |
 | `POST /api/shows/{id}/swap` | Swap a performer to another kit (song / rest of show), optional mark faulty |
 | `GET /api/shows/{id}/report` | Post-show report data |
-| `POST /api/login`, `POST /api/logout`, `PUT /api/users/{id}/pin` | PIN sign-in |
+| `GET /api/auth/status`, `POST /api/auth/login`, `/join`, `/logout` | Sign-in |
+| `POST/DELETE /api/auth/join-codes`, `GET/POST /api/auth/screens`, `DELETE /api/auth/screens/{id}` | Helper codes, screen enrolment (Lead) |
+| `PUT /api/users/{id}/pin`, `POST /api/users/{id}/sign-out` | PINs, sign out everywhere |
 | `GET/POST /api/backups` | List / create backups |
 | `GET /api/shows/{id}/export`, `POST /api/shows/import` | Show file (JSON) |
 | `GET /api/export/equipment.csv`, `POST /api/import/equipment` | Inventory CSV round-trip |

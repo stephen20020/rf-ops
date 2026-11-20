@@ -29,7 +29,7 @@
     <span class="conn pill" class:ok={store.connected} class:crit={!store.connected} data-testid="connection">
       {#if store.connected}● Live{:else}● Offline · {store.staleSeconds}s stale{/if}
     </span>
-    <a class="op" href="#/login" title="Change operator">{store.operatorName}{store.user ? ` · ${store.user.role}` : ''}</a>
+    <span class="op" title="Signed in">{store.operatorName}{store.me ? ` · ${store.isScreen ? 'screen' : store.me.role}` : ''}</span>
     <button class="ghost small" onclick={() => store.logout()}>Sign out</button>
   </div>
 </header>

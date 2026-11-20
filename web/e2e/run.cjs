@@ -27,7 +27,15 @@ function freePort() {
 async function startServer(db, port, seed) {
   const args = seed ? ['--seed-demo'] : [];
   const proc = spawn(BIN, args, {
-    env: { ...process.env, RFOPS_DB: `sqlite://${db}`, RFOPS_ADDR: `127.0.0.1:${port}`, RFOPS_WEB: WEB, RUST_LOG: 'warn' },
+    env: {
+      ...process.env,
+      RFOPS_DB: `sqlite://${db}`,
+      RFOPS_ADDR: `127.0.0.1:${port}`,
+      RFOPS_WEB: WEB,
+      RUST_LOG: 'warn',
+      RFOPS_ADMIN_NAME: 'Admin',
+      RFOPS_ADMIN_PIN: PINS.Admin,
+    },
     stdio: ['ignore', 'inherit', 'inherit'],
   });
   for (let i = 0; i < 100; i++) {
@@ -48,9 +56,38 @@ function stopServer(proc) {
   });
 }
 
+// Every operator signs in with a PIN (step 1b). The Lead's comes from RFOPS_ADMIN_PIN; the
+// others are set by the Lead at the start of the run.
+const PINS = { Admin: '246810' };
+const pinFor = (name) => PINS[name] ?? '1111';
+const sessions = {};
+
+async function login(base, name) {
+  const r = await fetch(`${base}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-rfops-client': `e2e-node-${name}` },
+    body: JSON.stringify({ name, pin: pinFor(name) }),
+  });
+  assert.equal(r.status, 200, `sign in ${name}: ${await r.clone().text()}`);
+  sessions[name] = r.headers.getSetCookie().find((c) => c.startsWith('rfops_session=')).split(';')[0];
+  return sessions[name];
+}
+
+/** API call signed in as `name` (from Node, no Origin header). */
+async function api(base, name, method, path, body) {
+  const cookie = sessions[name] ?? (await login(base, name));
+  return fetch(`${base}${path}`, {
+    method,
+    headers: { 'content-type': 'application/json', cookie },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
 async function client(browser, base, operator, hash, viewport = { width: 1920, height: 1080 }) {
   const ctx = await browser.newContext({ viewport });
-  await ctx.addInitScript((op) => localStorage.setItem('rfops.operator', op), operator);
+  // Sign in through the browser context so it holds its own session cookie.
+  const r = await ctx.request.post(`${base}/api/auth/login`, { data: { name: operator, pin: pinFor(operator) } });
+  assert.equal(r.status(), 200, `browser sign in ${operator}`);
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
@@ -87,6 +124,11 @@ async function timed(fn) {
   const base = `http://127.0.0.1:${port}`;
   let server = await startServer(db, port, true);
   const browser = await chromium.launch();
+  const users = await (await api(base, 'Admin', 'GET', '/api/users')).json();
+  for (const u of users.filter((u) => u.name !== 'Admin')) {
+    const r = await api(base, 'Admin', 'PUT', `/api/users/${u.id}/pin`, { pin: pinFor(u.name) });
+    assert.equal(r.status, 200);
+  }
 
   const back = await client(browser, base, 'A2 Stage Left', '#/backstage');
   const foh = await client(browser, base, 'FOH', '#/foh', { width: 1440, height: 900 });
@@ -152,11 +194,7 @@ async function timed(fn) {
     }
     // State survived and new changes still sync.
     await back.page.getByTestId('current-song').filter({ hasText: 'Song 1' }).waitFor({ timeout: 1000 });
-    const r = await fetch(`${base}/api/alerts`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-rfops-actor': 'A2 Stage Right' },
-      body: JSON.stringify({ severity: 'warning', title: 'After restart' }),
-    });
+    const r = await api(base, 'A2 Stage Right', 'POST', '/api/alerts', { severity: 'warning', title: 'After restart' });
     assert.equal(r.status, 201);
     await foh.page.getByTestId('alert').filter({ hasText: 'After restart' }).waitFor({ timeout: 1000 });
     await back.page.getByTestId('alert').filter({ hasText: 'After restart' }).waitFor({ timeout: 1000 });
@@ -177,22 +215,19 @@ async function timed(fn) {
   await test('viewer role cannot make changes', async () => {
     const v = await client(browser, base, 'Viewer', '#/backstage');
     assert.equal(await v.page.getByTestId('raise-alert').isDisabled(), true);
-    const r = await fetch(`${base}/api/alerts`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-rfops-actor': 'Viewer' },
-      body: JSON.stringify({ severity: 'info', title: 'nope' }),
-    });
+    const r = await api(base, 'Viewer', 'POST', '/api/alerts', { severity: 'info', title: 'nope' });
     assert.equal(r.status, 403);
     await v.ctx.close();
   });
 
   await test('swap to spare in 3 taps from an alert; FOH banner in < 1 s', async () => {
-    const snap = await (await fetch(`${base}/api/snapshot`)).json();
+    const snap = await (await api(base, 'Admin', 'GET', '/api/snapshot')).json();
     const maya = snap.performers.find((p) => p.name === 'Maya').id;
-    const r = await fetch(`${base}/api/alerts`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-rfops-actor': 'FOH' },
-      body: JSON.stringify({ severity: 'critical', title: 'Vox 1 dropping out', performer_id: maya, show_id: snap.shows[0].id }),
+    const r = await api(base, 'FOH', 'POST', '/api/alerts', {
+      severity: 'critical',
+      title: 'Vox 1 dropping out',
+      performer_id: maya,
+      show_id: snap.shows[0].id,
     });
     assert.equal(r.status, 201);
     const alert = back.page.getByTestId('alert').filter({ hasText: 'Vox 1 dropping out' });
@@ -212,7 +247,7 @@ async function timed(fn) {
     // FOH channel table follows, the alert is acknowledged, the failed pack is faulty.
     await foh.page.getByTestId('foh-row').filter({ hasText: 'Spare HH A' }).filter({ hasText: 'Maya' }).waitFor({ timeout: 1000 });
     await back.page.locator('[data-testid=alert][data-state=acknowledged]').filter({ hasText: 'Vox 1 dropping out' }).waitFor({ timeout: 1000 });
-    const eq = await (await fetch(`${base}/api/equipment?kind=handheld_tx`)).json();
+    const eq = await (await api(base, 'Admin', 'GET', '/api/equipment?kind=handheld_tx')).json();
     assert.equal(eq.find((e) => e.label === 'HH2').status, 'faulty');
     await foh.page.getByTestId('swap-banner').getByRole('button', { name: 'Got it' }).click();
     await foh.page.getByTestId('swap-banner').waitFor({ state: 'detached', timeout: 1000 });
@@ -229,12 +264,13 @@ async function timed(fn) {
     const firstCell = admin.page.locator('td select').first();
     assert.equal(await firstCell.isDisabled(), true, 'grid locked');
     // Server enforces it too.
-    const snap = await (await fetch(`${base}/api/snapshot`)).json();
+    const snap = await (await api(base, 'Admin', 'GET', '/api/snapshot')).json();
     const show = snap.shows[0].id;
-    const r = await fetch(`${base}/api/shows/${show}/assignments/cell`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json', 'x-rfops-actor': 'Admin' },
-      body: JSON.stringify({ performer_id: snap.performers[0].id, kind: 'mic', song_id: null, kit_ids: [] }),
+    const r = await api(base, 'Admin', 'PUT', `/api/shows/${show}/assignments/cell`, {
+      performer_id: snap.performers[0].id,
+      kind: 'mic',
+      song_id: null,
+      kit_ids: [],
     });
     assert.equal(r.status, 409);
     // Battery rule alerts for unchecked packs in use show up on FOH.
@@ -247,28 +283,45 @@ async function timed(fn) {
     await admin.ctx.close();
   });
 
-  await test('PIN: operator with a PIN must sign in on the PIN pad', async () => {
-    const snap = await (await fetch(`${base}/api/snapshot`)).json();
+  await test('PIN change signs the screen out; signing in again on the PIN pad works', async () => {
+    const snap = await (await api(base, 'Admin', 'GET', '/api/snapshot')).json();
     const sr = snap.users.find((u) => u.name === 'A2 Stage Right').id;
-    const r = await fetch(`${base}/api/users/${sr}/pin`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json', 'x-rfops-actor': 'Admin' },
-      body: JSON.stringify({ pin: '4821' }),
-    });
+    const r = await api(base, 'Admin', 'PUT', `/api/users/${sr}/pin`, { pin: '4821' });
     assert.equal(r.status, 200);
-    // Next change from the stage-right screen is refused and sends it to sign-in.
-    await right.page.getByTestId('raise-alert').click();
-    await right.page.getByRole('button', { name: 'Crackle / noise' }).click();
-    await right.page.getByRole('button', { name: 'Raise alert', exact: true }).last().click();
-    await right.page.getByText('Please sign in again').waitFor({ timeout: 2000 });
-    await right.page.getByRole('button', { name: /A2 Stage Right/ }).click();
+    PINS['A2 Stage Right'] = '4821';
+    // The old session no longer works: the screen goes to sign-in (socket recheck or next tap).
+    await right.page.getByText('You were signed out').waitFor({ timeout: 15000 });
+    await right.page.getByTestId('login-name').fill('A2 Stage Right');
     for (const k of '4821') await right.page.getByRole('button', { name: k, exact: true }).click();
     await right.page.getByRole('button', { name: 'OK', exact: true }).click();
-    await right.page.getByTestId('raise-alert').waitFor({ timeout: 2000 });
+    await right.page.getByTestId('raise-alert').waitFor({ timeout: 3000 });
     await right.page.getByTestId('raise-alert').click();
     await right.page.getByRole('button', { name: 'Crackle / noise' }).click();
     await right.page.getByRole('button', { name: 'Raise alert', exact: true }).last().click();
     await foh.page.getByTestId('alert').filter({ hasText: 'Crackle / noise' }).waitFor({ timeout: 1000 });
+  });
+
+  await test('helper joins with a 6-digit code typed on the pad', async () => {
+    const h = await (await api(base, 'Admin', 'POST', '/api/users', { name: 'Jo', role: 'helper' })).json();
+    const { code } = await (await api(base, 'Admin', 'POST', '/api/auth/join-codes', { user_id: h.id })).json();
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await ctx.newPage();
+    await page.goto(`${base}/#/backstage`);
+    await page.getByRole('tab', { name: 'Have a code?' }).click();
+    for (const k of code) await page.getByRole('button', { name: k, exact: true }).click();
+    await page.getByRole('button', { name: 'OK', exact: true }).click();
+    await page.getByTestId('connection').filter({ hasText: 'Live' }).waitFor({ timeout: 5000 });
+    await ctx.close();
+  });
+
+  await test('signed-out browser sees sign-in, never show data', async () => {
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    await page.goto(`${base}/#/backstage`);
+    await page.getByTestId('login-name').waitFor({ timeout: 3000 });
+    const r = await page.request.get(`${base}/api/snapshot`);
+    assert.equal(r.status(), 401);
+    await ctx.close();
   });
 
   await test('post-show report lists the swap', async () => {
@@ -281,7 +334,7 @@ async function timed(fn) {
   });
 
   await test('MIDI: Playback cue moves every screen in < 1 s; lock and follow', async () => {
-    const k = await (await fetch(`${base}/api/midi/key`, { method: 'POST', headers: { 'x-rfops-actor': 'Admin', 'content-type': 'application/json' }, body: '{}' })).json();
+    const k = await (await api(base, 'Admin', 'POST', '/api/midi/key/rotate', {})).json();
     const send = (value) =>
       fetch(`${base}/api/midi`, {
         method: 'POST',

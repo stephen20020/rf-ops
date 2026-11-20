@@ -1,6 +1,6 @@
-import { get, post, send, setOperator, setToken, handleUnauthorized, ApiError } from './api';
+import { get, post, send, handleUnauthorized, ApiError, clientId } from './api';
 import type {
-  Alert, BatteryStatus, Effective, Equipment, Id, Kit, Performer, ServerEvent, Snapshot, Song, SwapPayload, User, WsMessage,
+  Alert, BatteryStatus, Effective, Equipment, Id, Kit, Performer, Principal, ServerEvent, Snapshot, Song, SwapPayload, User, WsMessage,
 } from './types';
 
 function load(key: string): string | null {
@@ -24,10 +24,14 @@ export interface Toast { id: number; text: string; kind: 'error' | 'info' | 'cri
 class Store {
   snapshot = $state<Snapshot | null>(null);
   showId = $state<Id | null>(Number(load('rfops.show')) || null);
-  operatorName = $state<string>(load('rfops.operator') ?? '');
-  token = $state<string>(load('rfops.token') ?? '');
-  /** Set when the server rejects this operator for lack of a PIN sign-in. */
-  needsPin = $state(false);
+  /** Who this browser is signed in as (a person or an enrolled screen); null = signed out. */
+  me = $state<Principal | null>(null);
+  /** False until the first /api/auth/status answer. */
+  authChecked = $state(false);
+  /** Some Lead can sign in (else the server needs RFOPS_ADMIN_NAME / RFOPS_ADMIN_PIN). */
+  adminExists = $state(true);
+  /** The session ended while in use (shown on the sign-in screen). */
+  sessionEnded = $state(false);
   dismissedSwaps = $state<number[]>([]);
   connected = $state(false);
   loaded = $state(false);
@@ -48,11 +52,13 @@ class Store {
   songById = $derived(new Map<Id, Song>(this.songs.map((s) => [s.id, s])));
   battery = $derived(new Map<Id, BatteryStatus>((this.show?.battery ?? []).map((b) => [b.equipment_id, b])));
   alerts = $derived<Alert[]>(this.snapshot?.alerts ?? []);
-  user = $derived<User | null>(this.snapshot?.users.find((u) => u.name === this.operatorName) ?? null);
-  /** No users configured yet: anyone may act, and the first admin should be created. */
-  bootstrap = $derived(this.loaded && (this.snapshot?.users.length ?? 0) === 0);
-  canEdit = $derived(this.bootstrap ? !!this.operatorName : !!this.user && this.user.role !== 'viewer');
-  isAdmin = $derived(this.bootstrap || this.user?.role === 'admin');
+  operatorName = $derived(this.me?.name ?? '');
+  user = $derived<User | null>(
+    this.me?.kind === 'u' ? (this.snapshot?.users.find((u) => u.id === this.me!.id) ?? null) : null,
+  );
+  isScreen = $derived(this.me?.kind === 's');
+  canEdit = $derived(!!this.me && this.me.role !== 'viewer');
+  isAdmin = $derived(this.me?.role === 'admin');
   staleSeconds = $derived(this.lastSyncAt ? Math.floor((this.now - this.lastSyncAt) / 1000) : 0);
   showMode = $derived(this.show?.show.mode === 'show');
   /** Swaps from the last 3 minutes that this screen has not dismissed, newest first. */
@@ -70,37 +76,74 @@ class Store {
   private toastSeq = 0;
 
   start() {
-    setOperator(this.operatorName);
-    setToken(this.token);
     handleUnauthorized(() => {
-      this.needsPin = true;
-      this.setToken('');
+      if (this.me) this.sessionEnded = true;
+      this.signedOut();
     });
     setInterval(() => (this.now = Date.now()), 1000);
+    void this.checkAuth();
+  }
+
+  /** Ask the server who we are; start syncing if signed in. */
+  async checkAuth() {
+    try {
+      const st = await get<{ signed_in: Principal | null; admin_exists: boolean }>('/api/auth/status');
+      this.adminExists = st.admin_exists;
+      if (st.signed_in) this.signedIn(st.signed_in);
+    } catch {
+      setTimeout(() => void this.checkAuth(), 2000);
+      return;
+    } finally {
+      this.authChecked = true;
+    }
+  }
+
+  private async recheck() {
+    try {
+      const st = await get<{ signed_in: Principal | null }>('/api/auth/status');
+      if (!st.signed_in) {
+        if (this.me) this.sessionEnded = true;
+        this.signedOut();
+      } else this.connect();
+    } catch {
+      setTimeout(() => void this.recheck(), this.backoff);
+    }
+  }
+
+  private signedIn(p: Principal) {
+    this.me = p;
+    this.sessionEnded = false;
     void this.refresh();
-    this.connect();
+    if (!this.ws) this.connect();
   }
 
-  setOperator(name: string) {
-    this.operatorName = name;
-    setOperator(name);
-    save('rfops.operator', name || null);
+  private signedOut() {
+    this.me = null;
+    this.snapshot = null;
+    this.loaded = false;
+    const ws = this.ws;
+    this.ws = null;
+    ws?.close();
   }
 
-  setToken(t: string) {
-    this.token = t;
-    setToken(t);
-    save('rfops.token', t || null);
-  }
-
-  /** Sign in (PIN may be empty for operators without one). */
+  /** Sign in with name + PIN. */
   async login(name: string, pin: string): Promise<boolean> {
     try {
-      const r = await post<{ token: string }>('/api/login', { name, pin });
-      this.setOperator(name);
-      this.setToken(r.token);
-      this.needsPin = false;
-      return true;
+      await post('/api/auth/login', { name, pin });
+      await this.checkAuth();
+      return !!this.me;
+    } catch (e) {
+      this.toast(e instanceof Error ? e.message : String(e), 'error');
+      return false;
+    }
+  }
+
+  /** Sign in a helper with the 6-digit code from the Lead. */
+  async join(code: string): Promise<boolean> {
+    try {
+      await post('/api/auth/join', { code });
+      await this.checkAuth();
+      return !!this.me;
     } catch (e) {
       this.toast(e instanceof Error ? e.message : String(e), 'error');
       return false;
@@ -109,12 +152,11 @@ class Store {
 
   async logout() {
     try {
-      await send('POST', '/api/logout', {});
+      await send('POST', '/api/auth/logout', {});
     } catch {
       /* ignore */
     }
-    this.setToken('');
-    this.setOperator('');
+    this.signedOut();
   }
 
   selectShow(id: Id | null) {
@@ -171,8 +213,14 @@ class Store {
 
   private connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${proto}://${location.host}/api/ws?after=${this.lastSeq}`);
+    if (!this.me) return;
+    const screen = location.hash.replace(/^#\/?/, '').split('?')[0] || 'backstage';
+    const ws = new WebSocket(
+      `${proto}://${location.host}/api/ws?after=${this.lastSeq}&client=${encodeURIComponent(clientId)}&screen=${encodeURIComponent(screen)}`,
+    );
     this.ws = ws;
+    let opened = false;
+    ws.addEventListener('open', () => (opened = true));
     ws.onopen = () => {
       this.connected = true;
       this.backoff = 500;
@@ -196,7 +244,14 @@ class Store {
     };
     ws.onclose = () => {
       this.connected = false;
+      if (this.ws !== ws) return; // closed on purpose (signed out)
       this.ws = null;
+      // Refused before opening: maybe the session ended. checkAuth reconnects if still signed in.
+      if (!opened) {
+        setTimeout(() => void this.recheck(), this.backoff);
+        this.backoff = Math.min(this.backoff * 2, 5000);
+        return;
+      }
       setTimeout(() => this.connect(), this.backoff);
       this.backoff = Math.min(this.backoff * 2, 5000);
     };

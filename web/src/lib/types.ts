@@ -7,7 +7,7 @@ export type EquipmentKind =
   | 'iem_tx' | 'iem_tx_channel' | 'iem_pack' | 'guitar_receiver' | 'guitar_pack' | 'battery';
 export type EquipmentStatus = 'available' | 'checked_out' | 'in_use' | 'faulty' | 'retired';
 export type KitKind = 'mic' | 'iem' | 'guitar';
-export type Role = 'admin' | 'a2' | 'foh' | 'viewer';
+export type Role = 'admin' | 'a2' | 'foh' | 'helper' | 'viewer';
 export type Severity = 'info' | 'warning' | 'critical';
 export type BatteryDue = 'ok' | 'due_soon' | 'overdue' | 'low' | 'unchecked';
 
@@ -114,4 +114,13 @@ export interface MidiStatus {
   bridge: { name: string; port: string | null; ports: string[]; online: boolean; last_seen_at: string } | null;
   recent: { at: string; source: string; message: string; outcome: string }[];
   channel: number; next_trigger: MidiTrigger | null; prev_trigger: MidiTrigger | null; target_show_id: Id | null;
+}
+
+/** The signed-in person ('u') or enrolled screen ('s'). */
+export interface Principal {
+  kind: 'u' | 's';
+  id: Id;
+  name: string;
+  role: string;
+  has_pin: boolean;
 }

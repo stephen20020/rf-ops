@@ -1,6 +1,6 @@
 <script lang="ts">
   import { store } from '../../lib/store.svelte';
-  import { del, patch, post, put } from '../../lib/api';
+  import { del, get, patch, post, put } from '../../lib/api';
   import type { Role } from '../../lib/types';
 
   let pf = $state({ name: '', role: '', zone: '', owner_user_id: null as number | null });
@@ -22,9 +22,51 @@
       if (pin === null) return;
       if (!/^[0-9]{4,8}$/.test(pin)) return store.toast('PIN must be 4–8 digits', 'error');
     }
-    const ok = await store.act(() => put(`/api/users/${id}/pin`, { pin }), clear ? `PIN removed for ${name}` : `PIN set for ${name}`);
     // Changing your own PIN signs you out everywhere, including here.
-    if (ok && name === store.operatorName) store.needsPin = true;
+    await store.act(() => put(`/api/users/${id}/pin`, { pin }), clear ? `PIN removed for ${name}` : `PIN set for ${name}`);
+  }
+
+  // Helpers: 6-digit join code (3 devices, 2 hours), shown as digits and as a link for a QR.
+  let joinCode = $state<{ name: string; code: string; expires_at: string } | null>(null);
+  async function makeCode(id: number) {
+    const r = await store.act(() => post<{ name: string; code: string; expires_at: string }>('/api/auth/join-codes', { user_id: id }));
+    if (r) joinCode = r;
+  }
+  async function cancelCodes() {
+    if (!confirm('Cancel every helper join code? Helpers already signed in stay signed in.')) return;
+    await store.act(() => del('/api/auth/join-codes'), 'All join codes cancelled');
+    joinCode = null;
+  }
+  async function signOutEverywhere(id: number, name: string) {
+    if (!confirm(`Sign ${name} out on every device?`)) return;
+    await store.act(() => post(`/api/users/${id}/sign-out`), `${name} signed out everywhere`);
+  }
+
+  // Screens (wall, FOH): enrol THIS browser; the Lead's own sign-in here is replaced.
+  type Screen = { id: number; name: string; role: string; last_seen_at: string | null; revoked: boolean };
+  let screens = $state<Screen[]>([]);
+  let sf = $state({ name: 'Wall', role: 'a2' });
+  async function loadScreens() {
+    if (!store.isAdmin) return;
+    try {
+      screens = await get<Screen[]>('/api/auth/screens');
+    } catch {
+      /* shown elsewhere */
+    }
+  }
+  $effect(() => {
+    void loadScreens();
+  });
+  async function enrol(e: SubmitEvent) {
+    e.preventDefault();
+    if (!confirm(`Make this browser the "${sf.name}" screen? You will be signed out here; the screen stays signed in for 7 days (always during a show).`)) return;
+    const ok = await store.act(() => post('/api/auth/screens', sf), `This browser is now "${sf.name}"`);
+    if (ok) location.reload();
+  }
+  async function removeScreen(s: Screen) {
+    if (!confirm(`Remove screen "${s.name}"? It is signed out at once.`)) return;
+    await store.act(() => del(`/api/auth/screens/${s.id}`), `Removed ${s.name}`);
+    void loadScreens();
   }
 
   async function addUser(e: SubmitEvent) {
@@ -73,7 +115,7 @@
       <form class="row" onsubmit={addUser}>
         <input placeholder="Name" bind:value={uf.name} aria-label="Operator name" />
         <select bind:value={uf.role} aria-label="Operator role">
-          <option value="admin">admin</option><option value="a2">a2</option><option value="foh">foh</option><option value="viewer">viewer</option>
+          <option value="admin">Lead (admin)</option><option value="a2">a2</option><option value="foh">foh</option><option value="helper">helper (join code)</option><option value="viewer">viewer</option>
         </select>
         <button class="primary" type="submit" disabled={!uf.name.trim()}>Add</button>
       </form>
@@ -82,14 +124,44 @@
       {#each users as u (u.id)}
         <li class="row">
           <span class="grow">{u.name} <span class="pill">{u.role}</span> {#if u.has_pin}🔒{/if}</span>
-          {#if store.isAdmin || u.name === store.operatorName}
+          {#if u.role === 'helper'}
+            {#if store.isAdmin}<button class="ghost" onclick={() => makeCode(u.id)}>Join code</button>{/if}
+          {:else if store.isAdmin || u.name === store.operatorName}
             <button class="ghost" onclick={() => setPin(u.id, u.name)}>{u.has_pin ? 'Change PIN' : 'Set PIN'}</button>
-            {#if u.has_pin}<button class="ghost" onclick={() => setPin(u.id, u.name, true)}>Remove</button>{/if}
           {/if}
+          {#if store.isAdmin}<button class="ghost" onclick={() => signOutEverywhere(u.id, u.name)}>Sign out</button>{/if}
         </li>
       {/each}
     </ul>
-    <p class="muted small">Operators with a PIN must sign in with it on each screen. Without a PIN anyone can pick that name.</p>
+    {#if joinCode}
+      <div class="code" data-testid="join-code">
+        <div>Code for <b>{joinCode.name}</b>: works on 3 devices for 2 hours</div>
+        <div class="digits">{joinCode.code.slice(0, 3)} {joinCode.code.slice(3)}</div>
+        <div class="muted small">Or open <code>{location.origin}/#/join?code={joinCode.code}</code></div>
+        <button class="ghost" onclick={() => (joinCode = null)}>Hide</button>
+      </div>
+    {/if}
+    <p class="muted small">Everyone except helpers signs in with name + PIN. Helpers use a join code from the Lead.</p>
+    {#if store.isAdmin}<button class="ghost" onclick={cancelCodes}>Cancel all join codes</button>{/if}
+
+    {#if store.isAdmin}
+      <h2>Screens</h2>
+      <form class="row" onsubmit={enrol}>
+        <input placeholder="Screen name (Wall SL)" bind:value={sf.name} aria-label="Screen name" />
+        <select bind:value={sf.role} aria-label="Screen role">
+          <option value="a2">backstage (a2)</option><option value="foh">FOH</option><option value="viewer">view only</option>
+        </select>
+        <button class="primary" type="submit" disabled={!sf.name.trim()}>Enrol this screen</button>
+      </form>
+      <ul class="ops">
+        {#each screens.filter((x) => !x.revoked) as sc (sc.id)}
+          <li class="row">
+            <span class="grow">{sc.name} <span class="pill">{sc.role}</span> <span class="muted small">{sc.last_seen_at ? `seen ${new Date(sc.last_seen_at).toLocaleString()}` : 'never seen'}</span></span>
+            <button class="ghost" onclick={() => removeScreen(sc)}>Remove</button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
   </section>
 </div>
 
@@ -98,6 +170,8 @@
   .grid { display: grid; gap: 10px; }
   .ops { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
   .small { font-size: 0.85rem; margin: 0; }
+  .code { border: 1px solid var(--accent); border-radius: 8px; padding: 10px; display: grid; gap: 6px; }
+  .digits { font-size: 2.4rem; font-weight: 700; letter-spacing: 0.1em; font-variant-numeric: tabular-nums; }
   td input { min-width: 100px; }
   @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
 </style>
