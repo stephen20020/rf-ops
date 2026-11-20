@@ -23,7 +23,7 @@ impl T {
     async fn demo() -> Self {
         let pool = db::connect("sqlite::memory:").await.unwrap();
         seed::seed_demo(&pool).await.unwrap();
-        let state = AppState::new(pool.clone()).await.unwrap().insecure_header_auth_for_tests().await;
+        let state = AppState::new(pool.clone()).await.unwrap().open_mode().await;
         let key = midi::rotate_key(&pool).await.unwrap();
         T {
             app: app(state.clone()),
@@ -123,13 +123,13 @@ async fn bridge_needs_the_key() {
     assert_eq!(s, StatusCode::UNAUTHORIZED);
     assert_eq!(t.current().await, None, "nothing changed");
 
-    // Only admins can see the key.
+    // Viewers can't touch the key (open mode restricts only viewers).
     let (s, _) = t
         .call(
             "POST",
             "/api/midi/key",
             None,
-            &[("x-rfops-actor", "A2 Stage Left")],
+            &[("x-rfops-actor", "Viewer")],
         )
         .await;
     assert_eq!(s, StatusCode::FORBIDDEN);
@@ -295,7 +295,7 @@ async fn next_and_prev_cues() {
             "PUT",
             "/api/midi/settings",
             Some(json!({ "channel": 1 })),
-            &[("x-rfops-actor", "FOH")],
+            &[("x-rfops-actor", "Viewer")],
         )
         .await;
     assert_eq!(s, StatusCode::FORBIDDEN);

@@ -235,6 +235,7 @@ async fn note_ip_failure(s: &AppState, headers: &HeaderMap) {
 async fn status(State(s): State<AppState>, headers: HeaderMap) -> ApiResult<Json<serde_json::Value>> {
     let me = auth::authenticate(&s, &headers).await.ok().map(|(p, _)| p);
     Ok(Json(json!({
+        "mode": s.auth.mode,
         "signed_in": me,
         "admin_exists": admin_exists(&s.pool).await?,
     })))

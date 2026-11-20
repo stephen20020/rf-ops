@@ -30,7 +30,7 @@ cd web && npm install && npm run build && cd ..
 ```
 
 ```bash
-RFOPS_ADMIN_NAME=Admin RFOPS_ADMIN_PIN=246810 cargo run -p rfops-server -- --seed-demo
+cargo run -p rfops-server -- --seed-demo
 ```
 
 To start from the HF 2026 console layout instead (12 colour mics on Ch 33–44, TX1–TX10), use
@@ -38,9 +38,12 @@ To start from the HF 2026 console layout instead (12 colour mics on Ch 33–44, 
 
 Open `http://<server-ip>:8080` on any device on the network. `--seed-demo` loads demo data
 (ULXD4Q receivers, XSW and G4 IEMs, GLXD guitar packs, 11 performers, an 8-segment service) only
-when the database is empty. Sign in as the Lead (`Admin` / `246810` above), then give each operator
-a PIN in Admin → People. Helpers get a 6-digit join code instead; wall and FOH screens are enrolled
-there too. An existing database: run `rfops-server --create-admin "Your name" 123456` once.
+when the database is empty. Each device types a name once (no PINs); actions are attributed to it.
+
+**Sign-in is open by default.** Anyone with the address can use it; names set up as *viewer* are
+read-only. To require PINs later, start with `RFOPS_AUTH=pin` plus `RFOPS_ADMIN_NAME` /
+`RFOPS_ADMIN_PIN` (or `rfops-server --create-admin "Your name" 123456`): then operators sign in
+with name + PIN, helpers with a 6-digit join code, and wall/FOH screens are enrolled in Admin.
 
 Screens:
 
@@ -60,13 +63,14 @@ Environment variables:
 - `RFOPS_ADDR` — listen address (default `0.0.0.0:8080`)
 - `RFOPS_WEB` — built web client folder (default `web/dist`)
 - `RFOPS_BACKUP_DIR` — backup folder (default `backups/` next to the database)
-- `RFOPS_ADMIN_NAME`, `RFOPS_ADMIN_PIN` — create the first Lead if no Lead with a PIN exists
+- `RFOPS_AUTH` — `open` (default: pick a name) or `pin` (PIN sign-in, join codes, screens)
+- `RFOPS_ADMIN_NAME`, `RFOPS_ADMIN_PIN` — PIN mode: create the first Lead if none can sign in
 - `RFOPS_SESSION_KEY` — session signing key, 32+ characters (production; shared with the standby)
 - `RFOPS_PUBLIC_ORIGIN` — e.g. `https://rfops.example.com` (exact Origin check, Secure cookies, HSTS)
 
-Every `/api/` request needs a session cookie from `POST /api/auth/login` (name + PIN) or
-`POST /api/auth/join` (helper code), except `/api/health`, `/api/auth/status` and the agent's
-`/api/midi` endpoints (bridge key). `viewer` operators are read-only. `x-rfops-client` (device id)
+Open mode: requests carry `x-rfops-actor: <name>`. PIN mode: every `/api/` request needs a session
+cookie from `POST /api/auth/login` (name + PIN) or `POST /api/auth/join` (helper code), except
+`/api/health`, `/api/auth/status` and the agent's `/api/midi` endpoints (bridge key). `viewer` operators are read-only. `x-rfops-client` (device id)
 is recorded in the event log; `x-rfops-idempotency-key` makes retries safe. Security model:
 `docs/hosting-and-security.md`.
 

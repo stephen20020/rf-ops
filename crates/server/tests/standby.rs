@@ -175,7 +175,14 @@ async fn file_state(dir: &std::path::Path, seed_it: bool) -> (AppState, sqlx::Sq
         seed::seed_demo(&pool).await.unwrap();
         upsert_admin(&pool, "Lead", "246810").await.unwrap();
     }
-    (AppState::new(pool.clone()).await.unwrap(), pool)
+    (
+        AppState::new(pool.clone())
+            .await
+            .unwrap()
+            .with_auth_mode(rfops_server::auth::AuthMode::Pin)
+            .await,
+        pool,
+    )
 }
 
 fn tmp(name: &str) -> std::path::PathBuf {

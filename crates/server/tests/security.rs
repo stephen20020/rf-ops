@@ -1,4 +1,4 @@
-//! Cloud sign-in (step 1b): everything behind a session, PIN and join-code sign-in, lockouts,
+//! PIN sign-in mode (`RFOPS_AUTH=pin`, step 1b): everything behind a session, PIN and join-code sign-in, lockouts,
 //! screens, revocation, Origin checks and security headers. Runs with real auth (no header
 //! identity).
 
@@ -8,7 +8,7 @@ use axum::{
     Router,
 };
 use http_body_util::BodyExt;
-use rfops_server::{app, auth, db, seed, upsert_admin, AppState};
+use rfops_server::{app, auth, auth::AuthMode, db, seed, upsert_admin, AppState};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -48,7 +48,11 @@ impl T {
         let pool = db::connect("sqlite::memory:").await.unwrap();
         seed::seed_demo(&pool).await.unwrap();
         upsert_admin(&pool, "Lead", "246810").await.unwrap();
-        let state = AppState::new(pool.clone()).await.unwrap();
+        let state = AppState::new(pool.clone())
+            .await
+            .unwrap()
+            .with_auth_mode(AuthMode::Pin)
+            .await;
         T {
             app: app(state.clone()),
             pool,
@@ -566,4 +570,39 @@ async fn viewers_and_pinless_operators_cannot_write() {
         )
         .await;
     assert_eq!(r.status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn open_mode_needs_only_a_name() {
+    let pool = db::connect("sqlite::memory:").await.unwrap();
+    seed::seed_demo(&pool).await.unwrap();
+    let state = AppState::new(pool.clone()).await.unwrap().open_mode().await;
+    let t = T { app: app(state.clone()), pool, state };
+    let r = t.call("GET", "/api/snapshot", None, &[]).await;
+    assert_eq!(r.status, StatusCode::OK, "reads need nothing");
+    let r = t.call("GET", "/api/auth/status", None, &[]).await;
+    assert_eq!(r.body["mode"], "open");
+    let r = t
+        .call(
+            "POST",
+            "/api/alerts",
+            Some(json!({ "severity": "info", "title": "x" })),
+            &[("x-rfops-actor", "Somebody New")],
+        )
+        .await;
+    assert!(r.status.is_success(), "any name may act: {}", r.body);
+    let actor: String = sqlx::query_scalar("SELECT actor FROM event_log ORDER BY seq DESC LIMIT 1")
+        .fetch_one(&t.pool)
+        .await
+        .unwrap();
+    assert_eq!(actor, "Somebody New");
+    let r = t
+        .call(
+            "POST",
+            "/api/alerts",
+            Some(json!({ "severity": "info", "title": "x" })),
+            &[("x-rfops-actor", "Viewer")],
+        )
+        .await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "a configured viewer stays read-only");
 }

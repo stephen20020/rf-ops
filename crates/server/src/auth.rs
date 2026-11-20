@@ -40,14 +40,32 @@ pub const ON_BEHALF_HEADER: &str = "x-rfops-on-behalf";
 
 type HmacSha256 = Hmac<Sha256>;
 
+/// How people identify themselves (`RFOPS_AUTH`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthMode {
+    /// Default: no sign-in. Each device sends the name it picked (`x-rfops-actor`) so actions are
+    /// attributed; anyone with the address can act. Viewers named in Admin stay read-only.
+    Open,
+    /// Name + PIN, helper join codes and enrolled screens (signed session cookies).
+    Pin,
+}
+
+impl AuthMode {
+    pub fn from_env() -> Self {
+        match std::env::var("RFOPS_AUTH").as_deref() {
+            Ok("pin") => AuthMode::Pin,
+            _ => AuthMode::Open,
+        }
+    }
+}
+
 /// Sign-in configuration, shared by every request.
 pub struct AuthConfig {
     key: Vec<u8>,
     /// `https://rfops.example.com`; when set, Origin must match it exactly and cookies are Secure.
     pub public_origin: Option<String>,
-    /// Test-only: identity comes from the legacy `x-rfops-actor` header and no session is
-    /// required. Never enabled by the server binary.
-    pub header_auth: bool,
+    pub mode: AuthMode,
     pub limiter: Limiter,
 }
 
@@ -56,9 +74,19 @@ impl AuthConfig {
         Self {
             key,
             public_origin: public_origin.map(|o| o.trim_end_matches('/').to_string()),
-            header_auth: false,
+            mode: AuthMode::Pin,
             limiter: Limiter::default(),
         }
+    }
+
+    pub fn with_mode(mut self, mode: AuthMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    /// Open mode: identity is the name the device sends; no session needed.
+    pub fn is_open(&self) -> bool {
+        self.mode == AuthMode::Open
     }
 
     fn secure(&self) -> bool {
@@ -414,7 +442,7 @@ pub async fn require_session(State(s): State<AppState>, mut req: Request, next: 
         )
             .into_response();
     }
-    if s.auth.header_auth || !path.starts_with("/api/") || is_public(path) {
+    if s.auth.is_open() || !path.starts_with("/api/") || is_public(path) {
         return next.run(req).await;
     }
     match authenticate(&s, req.headers()).await {

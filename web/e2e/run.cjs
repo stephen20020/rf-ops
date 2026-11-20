@@ -33,6 +33,7 @@ async function startServer(db, port, seed) {
       RFOPS_ADDR: `127.0.0.1:${port}`,
       RFOPS_WEB: WEB,
       RUST_LOG: 'warn',
+      RFOPS_AUTH: process.env.E2E_AUTH || 'pin',
       RFOPS_ADMIN_NAME: 'Admin',
       RFOPS_ADMIN_PIN: PINS.Admin,
     },
@@ -373,6 +374,30 @@ async function timed(fn) {
     await back.page.getByTestId('current-song').filter({ hasText: 'Walk-in' }).waitFor({ timeout: 1000 });
     await admin.page.getByTestId('midi-monitor').getByText('simulated by Admin').first().waitFor({ timeout: 2000 });
     await admin.ctx.close();
+  });
+
+  await test('open mode (default): type a name, no PIN, actions attributed', async () => {
+    const odir = fs.mkdtempSync(path.join(os.tmpdir(), 'rfops-e2e-open-'));
+    const oport = await freePort();
+    const obase = `http://127.0.0.1:${oport}`;
+    const saved = process.env.E2E_AUTH;
+    process.env.E2E_AUTH = 'open';
+    const osrv = await startServer(path.join(odir, 'o.db'), oport, true);
+    process.env.E2E_AUTH = saved;
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await ctx.newPage();
+    await page.goto(`${obase}/#/backstage`);
+    await page.getByTestId('open-name').fill('Sam');
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await page.getByTestId('connection').filter({ hasText: 'Live' }).waitFor({ timeout: 5000 });
+    await page.getByTestId('raise-alert').click();
+    await page.getByRole('button', { name: 'Dropout' }).click();
+    await page.getByRole('button', { name: 'Raise alert', exact: true }).last().click();
+    await page.getByTestId('alert').filter({ hasText: 'Dropout' }).first().waitFor({ timeout: 2000 });
+    const ev = await (await fetch(`${obase}/api/events?limit=5`)).json();
+    assert.ok(JSON.stringify(ev).includes('Sam'), 'attributed to Sam');
+    await ctx.close();
+    await stopServer(osrv);
   });
 
   await test('no page errors in any client', async () => {

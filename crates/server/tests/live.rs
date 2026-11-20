@@ -84,7 +84,7 @@ impl Srv {
     }
 
     async fn start_with(pool: sqlx::SqlitePool) -> Self {
-        let state = AppState::new(pool.clone()).await.unwrap().insecure_header_auth_for_tests().await;
+        let state = AppState::new(pool.clone()).await.unwrap().open_mode().await;
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap().to_string();
         tokio::spawn(async move { axum::serve(listener, app(state)).await.unwrap() });
@@ -219,7 +219,7 @@ async fn idempotent_retry_does_not_double_apply() {
 }
 
 #[tokio::test]
-async fn roles_are_enforced_once_users_exist() {
+async fn open_mode_only_viewers_are_restricted() {
     let srv = Srv::start().await;
     // Bootstrap: anyone may create the first admin.
     srv.post("/api/users", json!({ "name": "Boss", "role": "admin" }))
@@ -254,7 +254,7 @@ async fn roles_are_enforced_once_users_exist() {
             &as_("Nobody"),
         )
         .await;
-    assert_eq!(s, 403, "unknown operator");
+    assert_eq!(s, 201, "open mode: any name may act");
     let (s, _, _) = srv
         .http
         .call(
@@ -284,7 +284,7 @@ async fn roles_are_enforced_once_users_exist() {
             &as_("Left"),
         )
         .await;
-    assert_eq!(s, 403, "a2 cannot add operators");
+    assert_eq!(s, 201, "open mode: roles other than viewer don't restrict (PIN mode does)");
 }
 
 #[tokio::test]

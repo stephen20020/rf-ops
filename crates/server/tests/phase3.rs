@@ -21,7 +21,7 @@ impl T {
     async fn demo() -> Self {
         let pool = db::connect("sqlite::memory:").await.unwrap();
         seed::seed_demo(&pool).await.unwrap();
-        Self::with_state(AppState::new(pool.clone()).await.unwrap().insecure_header_auth_for_tests().await, pool)
+        Self::with_state(AppState::new(pool.clone()).await.unwrap().open_mode().await, pool)
     }
 
     fn with_state(state: AppState, pool: sqlx::SqlitePool) -> Self {
@@ -247,17 +247,9 @@ async fn pin_permissions_and_hash_never_leaves_server() {
     let admin = t.id_of("users", "name", "Admin").await;
     let left = t.id_of("users", "name", "A2 Stage Left").await;
 
-    // A2 cannot set someone else's PIN.
+    // Who may set whose PIN is checked in PIN mode (tests/security.rs). Here: format checks.
+    let _ = admin;
     t.actor = "A2 Stage Left".into();
-    let (st, _) = t
-        .req(
-            "PUT",
-            &format!("/api/users/{admin}/pin"),
-            Some(json!({ "pin": "1234" })),
-        )
-        .await;
-    assert_eq!(st, StatusCode::FORBIDDEN);
-    // But can set their own.
     let (st, v) = t
         .req(
             "PUT",
@@ -602,7 +594,7 @@ async fn backups_and_report() {
         .unwrap();
     seed::seed_demo(&pool).await.unwrap();
     let backups = dir.join("backups");
-    let state = AppState::new(pool.clone()).await.unwrap().insecure_header_auth_for_tests().await.with_backups(
+    let state = AppState::new(pool.clone()).await.unwrap().open_mode().await.with_backups(
         backups.clone(),
         std::time::Duration::from_secs(3600),
         std::time::Duration::from_secs(3600),

@@ -91,7 +91,7 @@ impl AppState {
             epoch,
             presence: hub::Presence::default(),
             startup_note: None,
-            auth: Arc::new(auth::AuthConfig::new(key, origin)),
+            auth: Arc::new(auth::AuthConfig::new(key, origin).with_mode(auth::AuthMode::from_env())),
             lease: None,
             exit_after_takeover: false,
         })
@@ -108,16 +108,17 @@ impl AppState {
         self.lease.as_ref().is_some_and(|l| l.is_fenced())
     }
 
-    /// TESTS ONLY: take identity from the legacy `x-rfops-actor` header with no session, as
-    /// before step 1b. The server binary never calls this; `tests/security.rs` checks the
-    /// default rejects header identity.
-    #[doc(hidden)]
-    pub async fn insecure_header_auth_for_tests(mut self) -> Self {
+    /// Choose open (names only) or PIN sign-in, overriding `RFOPS_AUTH`.
+    pub async fn with_auth_mode(mut self, mode: auth::AuthMode) -> Self {
         let key = auth::load_key(&self.pool).await.expect("session key");
-        let mut cfg = auth::AuthConfig::new(key, None);
-        cfg.header_auth = true;
-        self.auth = Arc::new(cfg);
+        let origin = self.auth.public_origin.clone();
+        self.auth = Arc::new(auth::AuthConfig::new(key, origin).with_mode(mode));
         self
+    }
+
+    /// Open mode (the default without `RFOPS_AUTH=pin`).
+    pub async fn open_mode(self) -> Self {
+        self.with_auth_mode(auth::AuthMode::Open).await
     }
 
     /// Enable verified backups to `dir`: every `show_every` while a show is in show mode, every
@@ -261,7 +262,7 @@ impl FromRequestParts<AppState> for Actor {
                 .filter(|s| !s.is_empty())
                 .map(str::to_owned)
         };
-        if !state.auth.header_auth {
+        if !state.auth.is_open() {
             let p = parts
                 .extensions
                 .get::<auth::Principal>()
@@ -297,32 +298,52 @@ impl FromRequestParts<AppState> for Actor {
             });
         }
 
-        // Legacy header identity (tests only, see `insecure_header_auth_for_tests`).
+        // Open mode: the name this device picked. Anyone may act; a name set up in Admin as a
+        // viewer stays read-only (for display-only screens).
         let name = header(ACTOR_HEADER)
-            .ok_or_else(|| ApiError::bad(format!("missing {ACTOR_HEADER} header")))?;
-        let any_users: Option<i64> = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
-            .fetch_optional(&state.pool)
-            .await?;
-        let role = if any_users.is_some() {
-            let row: Option<(String,)> = sqlx::query_as("SELECT role FROM users WHERE name = ?")
+            .map(|n| percent_decode(&n))
+            .ok_or_else(|| ApiError::bad(format!("missing {ACTOR_HEADER} header (pick a name)")))?;
+        if name.chars().count() > 60 {
+            return Err(ApiError::bad("name is too long"));
+        }
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT role FROM users WHERE name = ? COLLATE NOCASE")
                 .bind(&name)
                 .fetch_optional(&state.pool)
                 .await?;
-            let (role,) =
-                row.ok_or_else(|| ApiError::Forbidden(format!("unknown operator '{name}'")))?;
-            if role == "viewer" {
-                return Err(ApiError::Forbidden("viewers cannot make changes".into()));
-            }
-            Some(role)
-        } else {
-            None
-        };
+        if row.as_ref().is_some_and(|(r,)| r == "viewer") {
+            return Err(ApiError::Forbidden("viewers cannot make changes".into()));
+        }
+        // Everyone else can do everything in open mode.
+        let role = None;
         Ok(Actor {
             name,
             client_id: header(CLIENT_HEADER),
             role,
         })
     }
+}
+
+/// Names outside ASCII arrive percent-encoded (HTTP header values are Latin-1).
+fn percent_decode(s: &str) -> String {
+    if !s.contains('%') {
+        return s.to_string();
+    }
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let Some(v) = std::str::from_utf8(&b[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok()) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| s.to_string())
 }
 
 /// Deserialize helper for PATCH bodies: absent => None, null => Some(None), value => Some(Some(v)).

@@ -90,8 +90,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 upsert_admin(&pool, &name, &pin).await?;
                 tracing::info!(%name, "first Lead created from RFOPS_ADMIN_NAME / RFOPS_ADMIN_PIN");
             }
+            _ if rfops_server::auth::AuthMode::from_env() == rfops_server::auth::AuthMode::Open => {}
             _ => tracing::warn!(
-                "no Lead with a PIN exists: nobody can sign in. Set RFOPS_ADMIN_NAME and RFOPS_ADMIN_PIN, or run `rfops-server --create-admin <name> <pin>`"
+                "RFOPS_AUTH=pin but no Lead with a PIN exists: nobody can sign in. Set RFOPS_ADMIN_NAME and RFOPS_ADMIN_PIN, or run `rfops-server --create-admin <name> <pin>`"
             ),
         }
     }

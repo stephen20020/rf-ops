@@ -127,7 +127,7 @@ pub fn now() -> String {
 pub struct Actor {
     pub name: String,
     pub client_id: Option<String>,
-    /// Role from the users table; `None` while no users are configured (bootstrap mode).
+    /// Role from the users table; `None` in open mode (everyone may do everything).
     pub role: Option<String>,
 }
 

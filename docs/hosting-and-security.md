@@ -89,6 +89,11 @@ Full detail is in `docs/reliability.md` §2.2 and §3.6.
 
 ## Security (now on the public internet)
 
+> **Owner decision (Nov 2026): open by default.** `RFOPS_AUTH=open`: no sign-in; each device picks
+> a name for attribution, and viewer names are read-only. Anyone with the address can act. Everything
+> below is built and tested and applies with `RFOPS_AUTH=pin`. The always-on parts are: the
+> agent key, Origin check, headers, the standby lease and backups.
+
 Every requirement is testable. The data structures are in `docs/data-model.md` §2 (operators,
 sessions, screens).
 

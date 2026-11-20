@@ -12,10 +12,9 @@ envVarGroups:
         sync: false # https://rfops.<your domain>
       - key: RFOPS_TZ
         value: America/Chicago
-      - key: RFOPS_ADMIN_NAME
-        sync: false
-      - key: RFOPS_ADMIN_PIN
-        sync: false
+      # open = pick a name, no PINs (owner's choice). Set to pin to require PIN sign-in.
+      - key: RFOPS_AUTH
+        value: open
       - key: RFOPS_R2_ENDPOINT
         sync: false # https://<account id>.r2.cloudflarestorage.com
       - key: RFOPS_R2_BUCKET

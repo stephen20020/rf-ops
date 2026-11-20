@@ -55,7 +55,7 @@
     }
   }
   $effect(() => {
-    void loadScreens();
+    if (store.authMode === 'pin') void loadScreens();
   });
   async function enrol(e: SubmitEvent) {
     e.preventDefault();
@@ -124,12 +124,14 @@
       {#each users as u (u.id)}
         <li class="row">
           <span class="grow">{u.name} <span class="pill">{u.role}</span> {#if u.has_pin}🔒{/if}</span>
-          {#if u.role === 'helper'}
+          {#if store.authMode === 'open'}
+            <!-- Open mode: names only, no PINs. -->
+          {:else if u.role === 'helper'}
             {#if store.isAdmin}<button class="ghost" onclick={() => makeCode(u.id)}>Join code</button>{/if}
           {:else if store.isAdmin || u.name === store.operatorName}
             <button class="ghost" onclick={() => setPin(u.id, u.name)}>{u.has_pin ? 'Change PIN' : 'Set PIN'}</button>
           {/if}
-          {#if store.isAdmin}<button class="ghost" onclick={() => signOutEverywhere(u.id, u.name)}>Sign out</button>{/if}
+          {#if store.isAdmin && store.authMode === 'pin'}<button class="ghost" onclick={() => signOutEverywhere(u.id, u.name)}>Sign out</button>{/if}
         </li>
       {/each}
     </ul>
@@ -141,10 +143,15 @@
         <button class="ghost" onclick={() => (joinCode = null)}>Hide</button>
       </div>
     {/if}
-    <p class="muted small">Everyone except helpers signs in with name + PIN. Helpers use a join code from the Lead.</p>
-    {#if store.isAdmin}<button class="ghost" onclick={cancelCodes}>Cancel all join codes</button>{/if}
+    {#if store.authMode === 'open'}
+      <p class="muted small">Open mode: anyone with the address picks a name on their device; no PINs. Operators listed here
+        appear as quick picks, and a <b>viewer</b> name is read-only. PIN sign-in can be turned on later (RFOPS_AUTH=pin).</p>
+    {:else}
+      <p class="muted small">Everyone except helpers signs in with name + PIN. Helpers use a join code from the Lead.</p>
+      {#if store.isAdmin}<button class="ghost" onclick={cancelCodes}>Cancel all join codes</button>{/if}
+    {/if}
 
-    {#if store.isAdmin}
+    {#if store.isAdmin && store.authMode === 'pin'}
       <h2>Screens</h2>
       <form class="row" onsubmit={enrol}>
         <input placeholder="Screen name (Wall SL)" bind:value={sf.name} aria-label="Screen name" />

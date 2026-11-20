@@ -46,6 +46,16 @@ function localValue(key: string, make: () => string): string {
 }
 export const deviceId = localValue('rfops.device', () => `dev-${uid().slice(0, 12)}`);
 
+/** Open mode: the name this device picked, sent with every request for attribution. */
+let operatorName = '';
+export function setOperatorName(n: string) {
+  operatorName = n;
+}
+function nameHeader(): Record<string, string> {
+  // Header values must be ISO-8859-1; encode anything else.
+  return operatorName ? { 'x-rfops-actor': /^[\x20-\x7e]*$/.test(operatorName) ? operatorName : encodeURIComponent(operatorName) } : {};
+}
+
 /** Called when the server says the session ended (signed out, expired, revoked). */
 let onUnauthorized: (() => void) | null = null;
 export function handleUnauthorized(fn: () => void) {
@@ -53,7 +63,7 @@ export function handleUnauthorized(fn: () => void) {
 }
 
 export async function get<T>(path: string): Promise<T> {
-  const res = await fetch(path, { headers: { accept: 'application/json' }, credentials: 'same-origin' });
+  const res = await fetch(path, { headers: { accept: 'application/json', ...nameHeader() }, credentials: 'same-origin' });
   if (!res.ok) {
     if (res.status === 401) onUnauthorized?.();
     throw new ApiError(res.status, await errorText(res));
@@ -85,6 +95,7 @@ export async function send<T = unknown>(method: 'POST' | 'PATCH' | 'PUT' | 'DELE
           'content-type': 'application/json',
           'x-rfops-client': deviceId,
           'x-rfops-idempotency-key': key,
+          ...nameHeader(),
         },
         body: body === undefined ? undefined : JSON.stringify(body),
       });
@@ -117,6 +128,7 @@ export async function postText(path: string, body: string): Promise<{ status: nu
     headers: {
       'content-type': 'text/csv',
       'x-rfops-client': deviceId,
+      ...nameHeader(),
     },
     body,
   });

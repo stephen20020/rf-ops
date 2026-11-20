@@ -259,7 +259,7 @@ pub async fn ws_handler(
     Query(mut q): Query<WsQuery>,
 ) -> Response {
     // Signed in: presence shows the real name, not what the client claims.
-    let recheck = if s.auth.header_auth {
+    let recheck = if s.auth.is_open() {
         None
     } else {
         if let Some(axum::Extension(p)) = &principal {

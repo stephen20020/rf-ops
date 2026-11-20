@@ -1,4 +1,4 @@
-import { get, post, send, handleUnauthorized, ApiError, clientId } from './api';
+import { get, post, send, handleUnauthorized, ApiError, clientId, setOperatorName } from './api';
 import type {
   Alert, BatteryStatus, Effective, Equipment, Id, Kit, Performer, Principal, ServerEvent, Snapshot, Song, SwapPayload, User, WsMessage,
 } from './types';
@@ -30,6 +30,8 @@ class Store {
   authChecked = $state(false);
   /** Some Lead can sign in (else the server needs RFOPS_ADMIN_NAME / RFOPS_ADMIN_PIN). */
   adminExists = $state(true);
+  /** 'open' (default): just pick a name. 'pin': PIN sign-in, join codes, screens. */
+  authMode = $state<'open' | 'pin'>('open');
   /** This server is fenced (standby, or taken over): it serves no data. */
   fenced = $state(false);
   /** The session ended while in use (shown on the sign-in screen). */
@@ -56,7 +58,11 @@ class Store {
   alerts = $derived<Alert[]>(this.snapshot?.alerts ?? []);
   operatorName = $derived(this.me?.name ?? '');
   user = $derived<User | null>(
-    this.me?.kind === 'u' ? (this.snapshot?.users.find((u) => u.id === this.me!.id) ?? null) : null,
+    this.me?.kind === 'u'
+      ? (this.snapshot?.users.find((u) =>
+          this.authMode === 'open' ? u.name.toLowerCase() === this.me!.name.toLowerCase() : u.id === this.me!.id,
+        ) ?? null)
+      : null,
   );
   isScreen = $derived(this.me?.kind === 's');
   canEdit = $derived(!!this.me && this.me.role !== 'viewer');
@@ -89,11 +95,15 @@ class Store {
   /** Ask the server who we are; start syncing if signed in. */
   async checkAuth() {
     try {
-      const st = await get<{ signed_in: Principal | null; admin_exists: boolean }>('/api/auth/status');
+      const st = await get<{ mode: 'open' | 'pin'; signed_in: Principal | null; admin_exists: boolean }>('/api/auth/status');
+      this.authMode = st.mode ?? 'pin';
       this.adminExists = st.admin_exists;
       this.fenced = false;
       this.authChecked = true;
-      if (st.signed_in) this.signedIn(st.signed_in);
+      if (this.authMode === 'open') {
+        const name = load('rfops.name');
+        if (name) this.useName(name);
+      } else if (st.signed_in) this.signedIn(st.signed_in);
     } catch (e) {
       // Server unreachable: keep showing "Connecting…" (never a sign-in screen) and retry.
       this.fenced = e instanceof ApiError && e.status === 503;
@@ -129,6 +139,16 @@ class Store {
     ws?.close();
   }
 
+  /** Open mode: this device acts as `name` (no PIN). Role comes from Admin if the name is set up there. */
+  useName(name: string) {
+    const n = name.trim();
+    if (!n) return;
+    save('rfops.name', n);
+    setOperatorName(n);
+    const known = this.snapshot?.users.find((u) => u.name.toLowerCase() === n.toLowerCase());
+    this.signedIn({ kind: 'u', id: known?.id ?? 0, name: n, role: known?.role === 'viewer' ? 'viewer' : 'admin', has_pin: false });
+  }
+
   /** Sign in with name + PIN. */
   async login(name: string, pin: string): Promise<boolean> {
     try {
@@ -154,6 +174,12 @@ class Store {
   }
 
   async logout() {
+    if (this.authMode === 'open') {
+      save('rfops.name', null);
+      setOperatorName('');
+      this.signedOut();
+      return;
+    }
     try {
       await send('POST', '/api/auth/logout', {});
     } catch {
@@ -219,7 +245,7 @@ class Store {
     if (!this.me) return;
     const screen = location.hash.replace(/^#\/?/, '').split('?')[0] || 'backstage';
     const ws = new WebSocket(
-      `${proto}://${location.host}/api/ws?after=${this.lastSeq}&client=${encodeURIComponent(clientId)}&screen=${encodeURIComponent(screen)}`,
+      `${proto}://${location.host}/api/ws?after=${this.lastSeq}&client=${encodeURIComponent(clientId)}&screen=${encodeURIComponent(screen)}&operator=${encodeURIComponent(this.me.name)}`,
     );
     this.ws = ws;
     let opened = false;

@@ -1,5 +1,24 @@
 <script lang="ts">
   import { store } from '../lib/store.svelte';
+  import { get } from '../lib/api';
+  import type { User } from '../lib/types';
+
+  // Open mode: no PIN, just a name for "who did what".
+  let openName = $state(loadName());
+  let known = $state<User[]>([]);
+  $effect(() => {
+    if (store.authMode === 'open') get<User[]>('/api/users').then((u) => (known = u)).catch(() => {});
+  });
+  function useName(n: string) {
+    if (!n.trim()) return;
+    store.useName(n);
+    try {
+      localStorage.setItem('rfops.lastName', n.trim());
+    } catch {
+      /* ignore */
+    }
+    if (location.hash.startsWith('#/login') || location.hash.startsWith('#/join')) location.hash = '#/backstage';
+  }
 
   // Sign-in (docs/interface-spec.md §1.1): name + PIN for Leads, A2s and FOH; a 6-digit code
   // from the Lead for helpers. A QR link opens #/join?code=123456 and signs in directly.
@@ -60,6 +79,7 @@
 </script>
 
 <svelte:window onkeydown={(e) => {
+  if (store.authMode === 'open') return;
   if ((e.target as HTMLElement)?.tagName === 'INPUT') {
     if (e.key === 'Enter') void submit();
     return;
@@ -71,6 +91,20 @@
 
 <section class="login">
   <h1>RF Ops</h1>
+  {#if store.authMode === 'open'}
+    <p class="muted">Who's using this screen? Your name goes next to what you do.</p>
+    <form class="field" onsubmit={(e) => { e.preventDefault(); useName(openName); }}>
+      <input bind:value={openName} placeholder="Your name (or Wall SL, FOH…)" autocomplete="username" data-testid="open-name" />
+      <button class="primary big" type="submit" disabled={!openName.trim()}>Continue</button>
+    </form>
+    {#if known.length}
+      <div class="chips">
+        {#each known as u (u.id)}
+          <button class="chip" onclick={() => useName(u.name)}>{u.name}</button>
+        {/each}
+      </div>
+    {/if}
+  {:else}
   {#if !store.adminExists}
     <p class="warnbox" data-testid="not-set-up">
       No Lead can sign in yet. On the server, set <code>RFOPS_ADMIN_NAME</code> and <code>RFOPS_ADMIN_PIN</code>
@@ -102,6 +136,7 @@
       <button class="key" class:primary={k === 'OK'} disabled={busy || (k === 'OK' && !ready)} onclick={() => press(k)}>{k}</button>
     {/each}
   </div>
+  {/if}
 </section>
 
 <style>
@@ -116,6 +151,8 @@
   .dots { display: flex; gap: 12px; justify-content: center; }
   .dots span { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--muted); }
   .dots span.on { background: var(--text); border-color: var(--text); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { min-height: 48px; }
   .warnbox { padding: 10px 12px; border-radius: 8px; border: 1px solid var(--warn); color: var(--warn); margin: 0; }
   code { font-size: 0.9em; }
 </style>
