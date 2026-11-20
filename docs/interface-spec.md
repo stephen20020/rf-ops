@@ -9,6 +9,14 @@ standards; sources at the end) and an audit of the current build (`docs/ux-audit
 handoffs and checklists, swaps, chat, setup and post-show. Each section ends with acceptance
 tests.
 
+## Decisions confirmed by the owner (Nov 2026)
+
+1. **Wall board = one tile per device** in fixed positions, showing the current holder (§5).
+2. **FOH must confirm every swap** ("Done at console") (§9).
+3. **Quick messages: canned phrases only**, with a device reference and an urgent flash (§12).
+4. **Performer photos** via phone-camera upload in Admin → People, shown on tiles, handoff cards
+   and FOH rows (§13.4).
+
 ---
 
 ## 0. Ten principles (everything else follows from these)
