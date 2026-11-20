@@ -68,6 +68,10 @@ class Store {
   canEdit = $derived(!!this.me && this.me.role !== 'viewer');
   isAdmin = $derived(this.me?.role === 'admin');
   staleSeconds = $derived(this.lastSyncAt ? Math.floor((this.now - this.lastSyncAt) / 1000) : 0);
+  /** reliability §3.1: STALE after 25 s with no server message, OFFLINE after 60, paper after 120. */
+  stale = $derived(this.loaded && this.staleSeconds >= 25);
+  offline = $derived(this.loaded && (!this.connected ? this.staleSeconds >= 5 : this.staleSeconds >= 60));
+  paper = $derived(this.loaded && this.staleSeconds >= 120);
   showMode = $derived(this.show?.show.mode === 'show');
   /** Swaps from the last 3 minutes that this screen has not dismissed, newest first. */
   swapBanners = $derived(
@@ -90,6 +94,21 @@ class Store {
   }
 
   start() {
+    // Phones lock and browsers freeze background tabs: on return, reconnect straight away if the
+    // data may be old (reliability §3.2).
+    const resume = () => {
+      if (document.visibilityState !== 'visible' || !this.me) return;
+      if (this.staleSeconds >= 15 || !this.connected) {
+        const ws = this.ws;
+        this.ws = null;
+        ws?.close();
+        this.connect();
+        void this.refresh();
+      }
+    };
+    document.addEventListener('visibilitychange', resume);
+    window.addEventListener('pageshow', resume);
+    window.addEventListener('online', resume);
     handleUnauthorized(() => {
       if (this.me) this.sessionEnded = true;
       this.signedOut();
@@ -268,6 +287,8 @@ class Store {
       } catch {
         return;
       }
+      // Any message (including the 10 s server tick) proves the data is current.
+      this.lastSyncAt = Date.now();
       if (msg.type === 'hello') {
         this.lastSyncAt = Date.now();
         if (msg.seq !== this.lastSeq) this.scheduleRefresh();
@@ -327,8 +348,8 @@ class Store {
 
   /** Run a command; blocked while offline or without permission. Errors become toasts. */
   async act<T>(fn: () => Promise<T>, okMessage?: string): Promise<T | undefined> {
-    if (!this.connected) {
-      this.toast('Offline — changes are blocked until the connection returns.', 'error');
+    if (!this.connected || this.stale) {
+      this.toast('Not connected to RF Ops — the change was not sent. Tell FOH on comms.', 'error');
       return undefined;
     }
     if (!this.canEdit) {

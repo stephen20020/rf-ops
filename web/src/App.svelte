@@ -44,6 +44,12 @@
   <Report />
 {:else}
   <TopBar {route} />
+  {#if store.offline}
+    <div class="offline" data-testid="offline-banner">
+      <b>{store.connected ? 'STALE' : 'OFFLINE'}</b> — no word from RF Ops for {store.staleSeconds} s. Changes are blocked. Tell FOH on comms.
+      {#if store.paper}<b>Follow your paper plot until it's back.</b>{/if}
+    </div>
+  {/if}
   <SwapBanner />
   <main>
     {#if route === 'board'}
@@ -62,6 +68,7 @@
 <Toasts />
 
 <style>
+  .offline { padding: 10px 12px; background: var(--crit); color: #fff; font-size: 1.05rem; }
   .loading { padding: 40px; text-align: center; }
   main { padding: 12px; }
   @media (max-width: 640px) {

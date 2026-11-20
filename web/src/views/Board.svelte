@@ -6,12 +6,15 @@
   import HandoffCard from '../components/board/HandoffCard.svelte';
   import SwapCard from '../components/board/SwapCard.svelte';
   import UndoBar from '../components/board/UndoBar.svelte';
+  import BoardAlerts from '../components/board/BoardAlerts.svelte';
   import { plan, type Tile } from '../lib/plan.svelte';
   import { store } from '../lib/store.svelte';
   import { post } from '../lib/api';
 
   type Filter = 'all' | 'mic' | 'iem' | 'guitar';
   let filter = $state<Filter>('all');
+  /** Battery round: tap OK / Fresh / LOW straight on each tile. */
+  let batteryRound = $state(false);
   let open = $state<Tile | null>(null);
 
   $effect(() => {
@@ -42,6 +45,7 @@
   <div class="songs"><SongBar /></div>
 
   <aside class="jobs">
+    <BoardAlerts />
     {#if swaps.length}
       <h2>Swaps</h2>
       {#each swaps as s (s.id)}<SwapCard {s} />{/each}
@@ -87,6 +91,10 @@
       {#each [['all', 'All'], ['mic', 'Mics'], ['iem', 'IEM'], ['guitar', 'Guitar']] as [k, n] (k)}
         <button class:primary={filter === k} onclick={() => (filter = k as Filter)}>{n}</button>
       {/each}
+      <button class:primary={batteryRound} onclick={() => (batteryRound = !batteryRound)} data-testid="battery-round">🔋 Battery round</button>
+      {#if batteryRound}
+        <span class="muted">{tiles.filter((t) => plan.batteries[String(t.id)]).length} / {tiles.length} checked for this show</span>
+      {/if}
     </div>
     {#if !plan.data}
       <p class="muted">Loading the board…</p>
@@ -96,7 +104,22 @@
     {#each groups as g (g.k)}
       <h2>{g.name}</h2>
       <div class="grid">
-        {#each g.list as t (t.id)}<DeviceTile tile={t} onopen={(x) => (open = x)} />{/each}
+        {#each g.list as t (t.id)}
+          {#if batteryRound}
+            {@const bat = plan.batteries[String(t.id)]}
+            <div class="battile" class:checked={!!bat} data-testid="battery-tile" data-device={t.label}>
+              <b>{t.label}</b>
+              <span class="muted small">{bat ? `✓ ${bat.result} · ${bat.by}` : 'not checked'}</span>
+              <div class="row">
+                <button onclick={() => plan.battery(t.id, 'ok')}>OK</button>
+                <button onclick={() => plan.battery(t.id, 'fresh')}>Fresh</button>
+                <button class="warn" onclick={() => plan.battery(t.id, 'low')}>LOW</button>
+              </div>
+            </div>
+          {:else}
+            <DeviceTile tile={t} onopen={(x) => (open = x)} />
+          {/if}
+        {/each}
       </div>
     {/each}
   </section>
@@ -117,6 +140,9 @@
   .done { min-height: 64px; min-width: 88px; }
   .small { font-size: 0.82rem; }
   .prep { padding-left: 4px; }
+  .battile { display: grid; gap: 4px; padding: 8px; border-radius: 10px; border: 1px solid var(--warn); background: var(--panel); }
+  .battile.checked { border-color: var(--line); }
+  .battile button { min-height: 44px; flex: 1; padding: 0 6px; }
   .conflict { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--warn); color: var(--warn); }
   @media (max-width: 860px) {
     .board { grid-template-columns: 1fr; grid-template-areas: 'songs' 'jobs' 'tiles'; }

@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "check": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
-    "test:e2e": "node e2e/run.cjs"
+    "test:e2e": "node e2e/run.cjs && node e2e/board.cjs"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "7.3.1",

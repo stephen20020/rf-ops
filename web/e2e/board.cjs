@@ -158,6 +158,26 @@ async function test(name, fn) {
     await admin.ctx.close();
   });
 
+  await test('problem report: 2 taps on the wall, appears on the phone, On it → Fixed', async () => {
+    await wall.page.locator('[data-testid=tile][data-device="E-Red"]').click();
+    await wall.page.getByRole('button', { name: 'No audio' }).click();
+    const a = phone.page.getByTestId('board-alert').filter({ hasText: 'E-Red (Helen): No audio' });
+    await a.waitFor({ timeout: 1000 });
+    await a.getByRole('button', { name: 'On it' }).click();
+    await wall.page.getByTestId('board-alert').filter({ hasText: 'Sam is on it' }).waitFor({ timeout: 1000 });
+    await wall.page.getByTestId('board-alert').getByRole('button', { name: 'Fixed' }).click();
+    await phone.page.getByTestId('board-alert').waitFor({ state: 'detached', timeout: 1000 });
+  });
+
+  await test('battery round: one tap per device, counted for this show', async () => {
+    await wall.page.getByTestId('battery-round').click();
+    const t = wall.page.locator('[data-testid=battery-tile][data-device="E-Tan"]');
+    await t.getByRole('button', { name: 'Fresh' }).click();
+    await t.filter({ hasText: '✓ fresh' }).waitFor({ timeout: 1000 });
+    await wall.page.getByTestId('battery-round').click();
+    await wall.page.locator('[data-testid=tile][data-device="E-Tan"]').filter({ hasText: '✓ fresh' }).waitFor({ timeout: 1000 });
+  });
+
   await test('phone layout: jobs first, tiles below, no horizontal scroll', async () => {
     const w = await phone.page.evaluate(() => document.documentElement.scrollWidth);
     assert.ok(w <= 392, `scrollWidth ${w}`);

@@ -27,8 +27,8 @@
     {#if store.show}
       <span class="pill" class:crit={store.showMode} data-testid="mode">{store.showMode ? 'SHOW MODE' : store.show.show.mode}</span>
     {/if}
-    <span class="conn pill" class:ok={store.connected} class:crit={!store.connected} data-testid="connection">
-      {#if store.connected}● Live{:else}● Offline · {store.staleSeconds}s stale{/if}
+    <span class="conn pill" class:ok={store.connected && !store.stale} class:crit={!store.connected || store.stale} data-testid="connection">
+      {#if store.connected && !store.stale}● Live{:else if store.connected}● STALE {store.staleSeconds}s{:else}● Offline · {store.staleSeconds}s stale{/if}
     </span>
     {#if store.authMode === 'open'}
       <a class="op" href="#/login" title="Change name">{store.operatorName}</a>

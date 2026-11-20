@@ -45,6 +45,24 @@
   async function battery(r: 'ok' | 'fresh' | 'low') {
     await plan.battery(tile.id, r);
   }
+
+  // Problem presets (interface spec §6.3): 2 taps from a tile. No audio / dropout are critical
+  // while the device is in use.
+  const inUse = $derived(tile.usage.usage === 'in_use' || tile.usage.usage === 'on_spare_for');
+  const who = $derived(tile.holder.kind === 'person' ? plan.person(tile.holder.id) : '');
+  async function problem(what: string, critical: boolean) {
+    const ok = await store.act(
+      () =>
+        post('/api/alerts', {
+          severity: critical && inUse ? 'critical' : 'warning',
+          title: `${tile.label}${who ? ` (${who})` : ''}: ${what}`,
+          show_id: store.showId,
+          performer_id: tile.holder.kind === 'person' ? tile.holder.id : null,
+        }),
+      'Reported',
+    );
+    if (ok) onclose();
+  }
 </script>
 
 <Modal title={`${tile.label}${tile.mix ? ' · ' + tile.mix : ''}`} {onclose}>
@@ -57,7 +75,16 @@
         <button class="big warn" onclick={() => battery('low')}>LOW</button>
       </div>
 
-      <div class="muted">Problem</div>
+      <div class="muted">Report a problem</div>
+      <div class="row">
+        <button class="big danger" onclick={() => problem('No audio', true)}>No audio</button>
+        <button class="big" onclick={() => problem('Dropouts', true)}>Dropouts</button>
+        <button class="big" onclick={() => problem('Crackle / noise', false)}>Crackle</button>
+        <button class="big" onclick={() => problem('Low battery', false)}>Low batt</button>
+        <button class="big" onclick={() => problem(tile.kind === 'iem' ? 'Wrong mix / pack' : 'Wrong mic', false)}>Wrong {tile.kind === 'iem' ? 'pack' : 'mic'}</button>
+      </div>
+
+      <div class="muted">Fix it</div>
       <div class="row">
         <button class="big danger" onclick={startSwap} data-testid="swap-start">Swap…</button>
         <button class="big" onclick={() => setStatus('suspect')}>Suspect</button>
