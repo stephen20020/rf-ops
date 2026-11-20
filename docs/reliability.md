@@ -1,5 +1,20 @@
 # Reliability plan
 
+> **Hosting changed:** RF Ops now runs on Render (`docs/hosting-and-security.md`).
+>
+> - **Server-Mac items** (§2 rows 2–4, §3, §6 "Server Mac") now apply only to the **Playback
+>   MacBook running the on-site agent**.
+> - **Server equivalents:**
+>   - Render paid instance;
+>   - deploy freeze on show days;
+>   - SIGTERM handling;
+>   - R2 off-site backups;
+>   - suspended standby service;
+>   - an external uptime check.
+> - **HTTPS (§4)** is resolved by Render's certificate.
+> - **New risk:** venue internet loss. It has the same effect as the server dying, and the same
+>   response: the paper fallback.
+
 Goal: the show never depends on RF Ops being up, but RF Ops is up for the whole show.
 
 **Tags:**

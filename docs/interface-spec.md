@@ -11,6 +11,7 @@
 **Companion documents:**
 - `docs/reliability.md`: failure modes, 26 reliability requirements, show-day setup.
 - `docs/hardware-integration.md`: device facts and bench tests.
+- `docs/hosting-and-security.md`: Render hosting, backups, standby and security requirements.
 
 ## Owner decisions
 
@@ -20,10 +21,10 @@
 | D2 | FOH must confirm every swap | Confirmed |
 | D3 | Quick messages, canned phrases only | Confirmed |
 | D4 | Performer photos (phone camera upload) | Confirmed |
-| D5 | Plain HTTP (phones = pull tool) vs local HTTPS (phone alerts, offline shell) | **Open** (reliability §4) |
-| D6 | Server hardware: dedicated Mac mini vs MacBook | **Open** |
-| D7 | Warm standby second Mac | **Open** |
-| D8 | Spare mics: is there at least one spare ULX-D handheld/bodypack available per show? | **Open** (swap design §10 handles both) |
+| D5 | HTTPS everywhere | **Resolved:** real certificate via Render on the owner's domain. Phone notifications, keep-awake and the offline shell are available |
+| D6 | Hosting | **Cloud only on Render** (paid instance with persistent disk), DNS and R2 backups on Cloudflare. Venue has reliable wired internet; internet loss = paper fallback (`docs/hosting-and-security.md`) |
+| D7 | Standby | **Cloud standby:** a suspended second Render service restores the newest R2 backup; target < 10 min |
+| D8 | Spare mics | **No dedicated spare.** Swap offers mics free in the current song (§10.2), then fallback options |
 
 ---
 
