@@ -1,0 +1,14 @@
+[package]
+name = "rfops-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "RF Ops command line: check, import and export show files"
+
+[[bin]]
+name = "rfops"
+path = "src/main.rs"
+
+[dependencies]
+ureq = { version = "2.12", default-features = false, features = ["json", "tls"] }
+serde_json.workspace = true

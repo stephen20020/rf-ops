@@ -21,7 +21,7 @@
 //!   - { name: Shosh, zone: SR }
 //!
 //! devices:                 # optional: only ones not already in RF Ops
-//!   - { label: Gabe's Shure, kind: mic }
+//!   - { label: Gabe's Shure, kind: iem, base: TX11 }
 //!
 //! mixes:                   # IEM transmitter → mix for this show
 //!   TX1: ME 1
@@ -116,9 +116,13 @@ impl PersonEntry {
 pub struct DeviceEntry {
     pub label: String,
     pub kind: Kind,
-    /// Console channel (mics/guitar) or IEM transmitter label ("TX1").
+    /// Console channel ("34").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel: Option<String>,
+    /// What it works through, by inventory label: the IEM transmitter ("TX1") or the mic /
+    /// guitar receiver channel ("ULXD-1/2").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub spare: bool,
     /// A guest's own device ("Chandler's pack"): name of the owner.

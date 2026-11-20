@@ -371,3 +371,28 @@ pub async fn write_holdings(
     }
     Ok(())
 }
+
+/// One-time: create the shared devices from the existing per-show kits (data model §5 step 3),
+/// so an existing database can use show files straight away. Does nothing once devices exist.
+pub async fn ensure_devices(pool: &SqlitePool) -> Result<u64, sqlx::Error> {
+    let any: Option<i64> = sqlx::query_scalar("SELECT id FROM devices LIMIT 1")
+        .fetch_optional(pool)
+        .await?;
+    if any.is_some() {
+        return Ok(0);
+    }
+    let r = sqlx::query(
+        "INSERT OR IGNORE INTO devices (label, kind, carrier_id, base_id, element_id, console_channel, is_spare, board_order, status)
+         SELECT e.label,
+                CASE k.kind WHEN 'iem' THEN 'iem' WHEN 'guitar' THEN 'guitar' ELSE 'mic' END,
+                k.carrier_id, k.base_id, k.element_id, CAST(k.console_channel AS TEXT), k.is_spare,
+                MIN(k.id),
+                CASE WHEN e.status IN ('faulty', 'retired') THEN 'out' ELSE 'ok' END
+         FROM kits k JOIN equipment e ON e.id = k.carrier_id
+         GROUP BY k.carrier_id
+         ORDER BY MIN(k.id)",
+    )
+    .execute(pool)
+    .await?;
+    Ok(r.rows_affected())
+}

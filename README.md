@@ -45,6 +45,10 @@ read-only. To require PINs later, start with `RFOPS_AUTH=pin` plus `RFOPS_ADMIN_
 `RFOPS_ADMIN_PIN` (or `rfops-server --create-admin "Your name" 123456`): then operators sign in
 with name + PIN, helpers with a 6-digit join code, and wall/FOH screens are enrolled in Admin.
 
+**Build shows from files:** `rfops show check|import|export` (crate `crates/cli`). See
+[`docs/show-files.md`](docs/show-files.md), including how to have an AI agent write a show file from
+the band's documents. Example: [`examples/hf2026-afternoon-friday.yaml`](examples/hf2026-afternoon-friday.yaml).
+
 Screens:
 
 - **Backstage** (`#/backstage`) — wall touchscreen and A2 phones: current/next song, performer cards

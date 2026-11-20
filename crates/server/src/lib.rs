@@ -76,6 +76,7 @@ impl AppState {
             hub.clone(),
         ));
         let epoch = ensure_epoch(&pool).await?;
+        plan_store::ensure_devices(&pool).await?;
         let key = auth::load_key(&pool).await?;
         let origin = std::env::var("RFOPS_PUBLIC_ORIGIN")
             .ok()

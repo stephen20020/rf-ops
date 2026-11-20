@@ -8,5 +8,5 @@ description = "Forwards MIDI cues from MultiTracks Playback to the RF Ops server
 [dependencies]
 rfops-core = { path = "../core" }
 midir = "0.10"
-ureq = { version = "2.12", default-features = false, features = ["json"] }
+ureq = { version = "2.12", default-features = false, features = ["json", "tls"] }
 serde_json.workspace = true

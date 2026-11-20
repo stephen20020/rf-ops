@@ -208,3 +208,21 @@ async fn device_status_blocks_handing_it_out() {
     assert!(!b["board"]["coming_up"].as_array().unwrap().iter().any(|h| h["device"] == red), "suspect Red isn't given out");
     assert!(b["board"]["conflicts"].to_string().contains("unusable_planned"));
 }
+
+#[tokio::test]
+async fn hf2026_example_file_imports_on_the_hf_seed() {
+    let pool = db::connect("sqlite::memory:").await.unwrap();
+    rfops_server::seed::seed_hf2026(&pool).await.unwrap();
+    let state = AppState::new(pool).await.unwrap().open_mode().await;
+    let t = T { app: app(state) };
+    let file = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/hf2026-afternoon-friday.yaml")).unwrap();
+    let (st, v) = t.yaml("/api/showfile/import", &file).await;
+    assert_eq!(st, StatusCode::OK, "updates the seeded show of the same name: {v}");
+    let show = v["show_id"].as_i64().unwrap();
+    assert_eq!(show, 1);
+    let b = t.board(show).await;
+    let rx3 = b["devices"].as_array().unwrap().iter().find(|d| d["label"] == "RX3").unwrap().clone();
+    assert_eq!(rx3["kind"], "iem");
+    // Pre-show: 12 packs to give out.
+    assert_eq!(b["board"]["coming_up"].as_array().unwrap().len(), 12, "{}", b["board"]["coming_up"]);
+}

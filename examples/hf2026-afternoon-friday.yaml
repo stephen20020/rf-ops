@@ -1,0 +1,56 @@
+# HF 2026 afternoon, Friday. From the Homestead Fair afternoon IEM & ME-1 sheet (latest owner
+# document). Load it with:  rfops show import examples/hf2026-afternoon-friday.yaml
+# Song list is a placeholder until the run order is final: edit the titles and pc numbers.
+
+show: HF Afternoon — Friday
+event: Homestead Fair 2026
+timezone: America/Chicago
+set: afternoon
+
+people:
+  - { name: Enoch, notes: Drums }
+  - { name: Aaron, notes: Bass }
+  - { name: Drummer 2, notes: Drums }
+  - { name: Tim, notes: Nord }
+  - { name: Judah, notes: Vocal }
+  - { name: Drummer 3, notes: Drums }
+  - { name: Stephen, notes: Choir director }
+  - { name: Sam, notes: Orchestra director }
+  - { name: Helen, notes: Vocal }
+  - { name: Shosh, notes: Vocal }
+  - { name: David, notes: "Acoustic / vocal. On Gabe's Shure pack, ME 10" }
+  - { name: Seth, notes: "Vocal. Sennheiser 1, Andrew Taylor's mix (ME TBC)" }
+  - { name: Josh Patterson, notes: "Guest. Sennheiser 2, ME 15 (choir wedge)" }
+
+# IEM transmitter → ME-1 mix for this show. RX1, RX3 and RX6 all listen to TX1.
+mixes:
+  TX1: ME 1
+  TX2: ME 2
+  TX4: ME 4
+  TX5: ME 5
+  TX7: Console mix
+  TX8: ME 16
+  TX10: ME 3
+
+songs:
+  - { title: Concert (before handoff) }
+  - title: I Will Follow Jesus / Lace Up Your Boots
+    passes:
+      - "RX10: Helen -> Shosh"
+  - { title: Concert (after handoff) }
+
+plot:
+  default:
+    RX1: Enoch
+    RX2: Aaron
+    RX3: Drummer 2
+    RX4: Tim
+    RX5: Judah
+    RX6: Drummer 3
+    RX7: Stephen
+    RX8: Sam
+    RX10: Helen
+    Gabe's Shure: David
+    Sennheiser 1: Seth
+    Sennheiser 2: Josh Patterson
+    # Wireless mics Ch 33–44 (Yellow … Bpack4): who sings on which colour is still TBC.

@@ -253,6 +253,21 @@ async fn server_checks(s: &AppState, f: &ShowFile) -> ApiResult<Vec<showfile::Pr
             });
         }
     }
+    for d in &f.devices {
+        if let Some(b) = &d.base {
+            let found: Option<i64> = sqlx::query_scalar("SELECT id FROM equipment WHERE label = ?")
+                .bind(b)
+                .fetch_optional(&s.pool)
+                .await?;
+            if found.is_none() {
+                out.push(showfile::Problem {
+                    level: Level::Error,
+                    at: format!("devices → {}", d.label),
+                    message: format!("There's no transmitter or receiver channel called \"{b}\" in the inventory."),
+                });
+            }
+        }
+    }
     if let Some(prev) = &f.follows {
         let found: Option<i64> = sqlx::query_scalar("SELECT id FROM shows WHERE name = ?")
             .bind(prev)
@@ -389,10 +404,15 @@ async fn showfile_import(
 
     // New devices.
     for d in &c.new_devices {
-        sqlx::query("INSERT INTO devices (label, kind, console_channel, is_spare, guest_owner_id) VALUES (?, ?, ?, ?, ?)")
-            .bind(&d.label).bind(kind_str(d.kind)).bind(&d.channel).bind(d.spare)
-            .bind(d.owner.as_ref().and_then(|o| person.get(o)))
-            .execute(&mut *tx).await?;
+        // The carrier is the inventory item with the same label (e.g. pack "RX10"), if any.
+        sqlx::query(
+            "INSERT INTO devices (label, kind, console_channel, is_spare, guest_owner_id, base_id, carrier_id)
+             VALUES (?, ?, ?, ?, ?, (SELECT id FROM equipment WHERE label = ?), (SELECT id FROM equipment WHERE label = ?))",
+        )
+        .bind(&d.label).bind(kind_str(d.kind)).bind(&d.channel).bind(d.spare)
+        .bind(d.owner.as_ref().and_then(|o| person.get(o)))
+        .bind(&d.base).bind(&d.label)
+        .execute(&mut *tx).await?;
     }
     let dev_rows: Vec<(String, Id)> = sqlx::query_as("SELECT label, id FROM devices").fetch_all(&mut *tx).await?;
     let device: BTreeMap<String, Id> = dev_rows.into_iter().collect();
