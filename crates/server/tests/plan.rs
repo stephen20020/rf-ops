@@ -353,3 +353,29 @@ async fn undo_battery_plot_edit_pull_and_count_in() {
     assert_eq!(st, StatusCode::OK);
     assert!(v["missing"].to_string().contains("Red"), "{v}");
 }
+
+/// The owner's case: a database seeded with the *demo* data (HH4, BP1…), not HF 2026. The
+/// example must still import: its own devices and missing transmitters are added.
+#[tokio::test]
+async fn hf2026_example_imports_on_a_demo_database_too() {
+    let pool = db::connect("sqlite::memory:").await.unwrap();
+    rfops_server::seed::seed_demo(&pool).await.unwrap();
+    let state = AppState::new(pool).await.unwrap().open_mode().await;
+    let t = T { app: app(state) };
+    let file = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/hf2026-afternoon-friday.yaml")).unwrap();
+    let (st, v) = t.yaml("/api/showfile/check", &file).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(v["ok"], true, "{v}");
+    assert!(v["warnings"].to_string().contains("will be added"), "{v}");
+    let (st, v) = t.yaml("/api/showfile/import", &file).await;
+    assert_eq!(st, StatusCode::CREATED, "{v}");
+    let show = v["show_id"].as_i64().unwrap();
+    let b = t.board(show).await;
+    let tile = |l: &str| b["devices"].as_array().unwrap().iter().find(|d| d["label"] == l).cloned();
+    assert!(tile("Red").is_some() && tile("GLXD1+-1").is_some());
+    assert_eq!(b["board"]["coming_up"].as_array().unwrap().len(), 12, "{}", b["board"]["coming_up"]);
+    // Importing again changes nothing new (idempotent).
+    let (st, v) = t.yaml("/api/showfile/import", &file).await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    assert!(v["warnings"].as_array().unwrap().is_empty(), "{v}");
+}

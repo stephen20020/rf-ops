@@ -79,6 +79,9 @@ plot:                              # who has each device
 - `nobody`, `none` or `-` means the device isn't used.
 - Kinds are `mic`, `iem` or `guitar`. `base` is the transmitter (IEM) or receiver channel (mic or
   guitar), by its inventory label.
+- A file can list every device it uses. Devices RF Ops already has stay as they are. New ones are
+  added, and so is any transmitter or receiver channel named in `base` that isn't in the inventory
+  yet (shown as a warning). So one file works on any RF Ops database.
 
 ## Updating a show that's already running
 

@@ -22,8 +22,39 @@ people:
   - { name: Seth, notes: "Vocal. Sennheiser 1, Andrew Taylor's mix (ME TBC)" }
   - { name: Josh Patterson, notes: "Guest. Sennheiser 2, ME 15 (choir wedge)" }
 
-# Guitar wireless: packs paired with their receivers (who plays which guitar is TBC).
+# Every device this show uses. Devices RF Ops already has are left as they are; new ones are
+# added, and so are any transmitters / receiver channels it doesn't have yet. So this file
+# imports into any RF Ops database.
 devices:
+  # Wireless mics on console Ch 33–44 (3x ULXD4Q = 12 receiver channels).
+  - { label: Yellow, kind: mic, channel: "33", base: ULXD-1/1 }
+  - { label: Red, kind: mic, channel: "34", base: ULXD-1/2 }
+  - { label: Blue, kind: mic, channel: "35", base: ULXD-1/3 }
+  - { label: Green, kind: mic, channel: "36", base: ULXD-1/4 }
+  - { label: Black, kind: mic, channel: "37", base: ULXD-2/1 }
+  - { label: White, kind: mic, channel: "38", base: ULXD-2/2 }
+  - { label: Orange, kind: mic, channel: "39", base: ULXD-2/3 }
+  - { label: Tan, kind: mic, channel: "40", base: ULXD-2/4 }
+  - { label: Bpack1, kind: mic, channel: "41", base: ULXD-3/1 }
+  - { label: Bpack2, kind: mic, channel: "42", base: ULXD-3/2 }
+  - { label: Bpack3, kind: mic, channel: "43", base: ULXD-3/3 }
+  - { label: Bpack4, kind: mic, channel: "44", base: ULXD-3/4 }
+  # IEM packs on their transmitters (RX3 and RX6 share TX1 with RX1).
+  - { label: RX1, kind: iem, base: TX1 }
+  - { label: RX2, kind: iem, base: TX2 }
+  - { label: RX3, kind: iem, base: TX1 }
+  - { label: RX4, kind: iem, base: TX4 }
+  - { label: RX5, kind: iem, base: TX5 }
+  - { label: RX6, kind: iem, base: TX1 }
+  - { label: RX7, kind: iem, base: TX7 }
+  - { label: RX8, kind: iem, base: TX8 }
+  - { label: RX9, kind: iem, base: TX9 }
+  - { label: RX10, kind: iem, base: TX10 }
+  # Packs whose transmitter isn't documented yet (TBC).
+  - { label: Gabe's Shure, kind: iem }
+  - { label: Sennheiser 1, kind: iem }
+  - { label: Sennheiser 2, kind: iem }
+  # Guitar wireless: packs with their receivers (who plays which guitar is TBC).
   - { label: GLXD1-1, kind: guitar, base: GLXD6-1 }
   - { label: GLXD1-2, kind: guitar, base: GLXD6-2 }
   - { label: GLXD1+-1, kind: guitar, base: GLXD6+-1 }

@@ -240,35 +240,53 @@ fn problems_json(p: &[showfile::Problem]) -> Value {
     })
 }
 
+async fn equipment_exists(s: &AppState, label: &str) -> ApiResult<bool> {
+    let found: Option<i64> = sqlx::query_scalar("SELECT id FROM equipment WHERE label = ?")
+        .bind(label)
+        .fetch_optional(&s.pool)
+        .await?;
+    Ok(found.is_some())
+}
+
+/// Transmitters / receiver channels the file's devices use that RF Ops doesn't have yet. They are
+/// added on import (a warning, not an error), so a show file works on any database.
+async fn missing_bases(s: &AppState, f: &ShowFile) -> ApiResult<Vec<(String, &'static str)>> {
+    let mut out: Vec<(String, &'static str)> = Vec::new();
+    for d in &f.devices {
+        let Some(b) = &d.base else { continue };
+        if out.iter().any(|(l, _)| l == b) || equipment_exists(s, b).await? {
+            continue;
+        }
+        let kind = match d.kind {
+            rfops_core::plan::Kind::Iem => "iem_tx_channel",
+            rfops_core::plan::Kind::Guitar => "guitar_receiver",
+            rfops_core::plan::Kind::Mic => "receiver_channel",
+        };
+        out.push((b.clone(), kind));
+    }
+    Ok(out)
+}
+
 /// Server-side checks the file format can't do alone (TX labels for mixes, `follows`).
 async fn server_checks(s: &AppState, f: &ShowFile) -> ApiResult<Vec<showfile::Problem>> {
     let mut out = Vec::new();
+    let added = missing_bases(s, f).await?;
+    for (b, _) in &added {
+        out.push(showfile::Problem {
+            level: Level::Warning,
+            at: "devices".into(),
+            message: format!("\"{b}\" isn't in the inventory yet; it will be added."),
+        });
+    }
     for tx in f.mixes.keys() {
-        let found: Option<i64> = sqlx::query_scalar("SELECT id FROM equipment WHERE label = ?")
-            .bind(tx)
-            .fetch_optional(&s.pool)
-            .await?;
-        if found.is_none() {
+        if !added.iter().any(|(l, _)| l == tx) && !equipment_exists(s, tx).await? {
             out.push(showfile::Problem {
                 level: Level::Error,
                 at: format!("mixes → {tx}"),
-                message: format!("There's no transmitter called \"{tx}\" in the inventory."),
+                message: format!(
+                    "There's no transmitter called \"{tx}\". Give a pack `base: {tx}` under devices, or check the spelling."
+                ),
             });
-        }
-    }
-    for d in &f.devices {
-        if let Some(b) = &d.base {
-            let found: Option<i64> = sqlx::query_scalar("SELECT id FROM equipment WHERE label = ?")
-                .bind(b)
-                .fetch_optional(&s.pool)
-                .await?;
-            if found.is_none() {
-                out.push(showfile::Problem {
-                    level: Level::Error,
-                    at: format!("devices → {}", d.label),
-                    message: format!("There's no transmitter or receiver channel called \"{b}\" in the inventory."),
-                });
-            }
         }
     }
     if let Some(prev) = &f.follows {
@@ -326,6 +344,7 @@ async fn showfile_import(
         return Ok(Json(problems_json(&probs)).into_response());
     }
 
+    let added = missing_bases(&s, &f).await?;
     // Read before the transaction (a second connection inside it would wait on its lock).
     let channel: u8 = crate::midi::setting(&s.pool, "midi.channel")
         .await?
@@ -403,6 +422,15 @@ async fn showfile_import(
     for p in c.people.iter().filter(|p| p.absent) {
         sqlx::query("INSERT INTO performer_absences (show_id, performer_id) VALUES (?, ?)")
             .bind(show_id).bind(person[&p.name]).execute(&mut *tx).await?;
+    }
+
+    // Transmitters / receiver channels the file needs that the inventory doesn't have yet.
+    for (label, kind) in &added {
+        sqlx::query("INSERT INTO equipment (kind, label, notes) VALUES (?, ?, 'Added by a show file')")
+            .bind(kind)
+            .bind(label)
+            .execute(&mut *tx)
+            .await?;
     }
 
     // New devices.
