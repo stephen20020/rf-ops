@@ -1,7 +1,10 @@
 # Operations guide
 
-How to install RF Ops on the show machine, run it every service, and recover when something
-goes wrong.
+> **Production runs in the cloud** (Render + Cloudflare; `docs/hosting-and-security.md`). This guide
+> currently describes running the server on a local Mac. Use that **only for development and
+> rehearsal** until the build reaches step 10 (deploy). At that point §1–3 are replaced by the
+> Render setup and the screen URLs become `https://rfops.<domain>/…`. The agent (§ bridge)
+> setup on the Playback MacBook stays as written.
 
 ## 1. Server machine
 

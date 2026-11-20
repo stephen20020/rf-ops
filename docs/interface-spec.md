@@ -1,14 +1,18 @@
-# RF Ops interface spec — v2
+# RF Ops interface spec — v3
 
-**Status:** v2 (Nov 2026). Supersedes v1.
+**Status:** v3 (Nov 2026). Supersedes v2. Resolves the second independent review's 17 blockers and
+records its other decisions (§23).
 
 **Builds on:**
 - the build audit (`docs/ux-audit.md`);
 - four research tracks: A2 practice, comparable products, alarm/HMI standards, reliability;
 - primary-source hardware facts (`docs/hardware-integration.md`);
-- an independent review of v1. Its 26 findings are each resolved in §21.
+- an independent review of v1. Its 26 findings are each resolved in §21;
+- an independent review of v2. Its 17 blockers and 25 other findings are resolved in §23.
 
 **Companion documents:**
+- `docs/data-model.md`: **authoritative** tables, derived values (holder, handoffs, usage) and
+  migration.
 - `docs/reliability.md`: failure modes, 26 reliability requirements, show-day setup.
 - `docs/hardware-integration.md`: device facts and bench tests.
 - `docs/hosting-and-security.md`: Render hosting, backups, standby and security requirements.
@@ -77,22 +81,40 @@
 | **Lead** (admin) | Laptop / any | Plot | Everything, including show-mode overrides |
 | **A2** | Wall touchscreen, phone | Board (wall) / My next (phone) | All live operations; song control: hold-to-advance on phones |
 | **FOH** | Laptop/iPad at the console | Channels | Report, confirm swaps, song control, messages |
-| **Helper** (volunteer A2) | Phone | My next | Handoff Done, battery checks, report Problem; no swaps, no song control |
+| **Helper** (volunteer A2) | Phone | My next | Handoff Done, Pass done, battery and line checks, report Problem, On it. No swaps, song control, Fixed on criticals, plot edits or admin |
 | **Viewer** | Any | Board | Read only |
 
-### 1.1 Joining and onboarding
+### 1.1 Signing in and onboarding
 
-- **Join code.** The Lead taps **Add helper**, types a name, picks a zone (SL/SR/…), and taps
-  Add. RF Ops shows a QR code plus a 4-digit join code. The helper scans it and is signed in
-  with their zone's performers already as "mine". There is no separate PIN entry for helpers;
-  the join code expires after the event.
+Security detail is in `docs/hosting-and-security.md` §Security 2–6.
+
+- **Leads, A2s, FOH** sign in with name + **PIN** (mandatory; there is no name-only sign-in).
+- **Helpers: join code.**
+  - The Lead taps **Add helper**, types a name, picks a zone (SL/SR/…), and taps Add.
+  - RF Ops shows a QR code plus a **6-digit code**. It works for **that helper on up to 3 devices
+    for 2 h**.
+  - Scanning signs the helper in, with their zone's performers already "mine".
+  - **Manual entry:** the sign-in screen always has "Have a code? Type it". This is needed on
+    iPhone: a Home-Screen icon has its own cookies, separate from Safari, so after adding the
+    icon the helper types the same code once more.
+  - **Re-issue all helper codes** (Admin → Operators) invalidates every outstanding code.
+  - **On the wall:** the QR shows only for 60 s after a Lead enters their PIN.
+- **Screens (wall, FOH).**
+  - A Lead enrols each screen once: Admin → Screens → **Enrol this screen**, a name ("Wall SL"),
+    and PIN.
+  - The credential lasts 7 days (sliding), never expires during show mode, and can be revoked.
+  - Wall actions are attributed "Wall"; tapping a name chip first makes them "Wall (Sam)" for
+    5 min.
 - **Assigning devices.** "Mine" for a phone = performers whose A2 owner is this operator, plus
   their zone. The Lead assigns zones in bulk (§15.4).
 - **First open.** A first-time phone shows a **3-card intro**: "Your next jobs are here",
   "Tap Done when handed over", "Tap Problem if anything is wrong". Then it goes to My next.
-- **Practice show.** **Practice show** (from Admin) clones the active show into a sandbox marked
-  PRACTICE. A diagonal "PRACTICE" watermark covers every screen in the sandbox. It is used for
-  training and never affects the real show.
+- **Practice show.**
+  - **Practice show** (from Admin) copies a show into a sandbox marked PRACTICE, with a diagonal
+    "PRACTICE" watermark on every screen in it.
+  - It has its own holdings, batteries, alerts and swaps, and cannot touch the real show or
+    equipment status (`docs/data-model.md` §4).
+  - It ignores MIDI unless "Practice with Playback" is on.
 
 ### 1.2 Active show (server-wide)
 
@@ -122,7 +144,7 @@
 | Guitar wireless | **guitar pack** (GLX 1) |
 | Receiver channel | **channel** (Ch 34) |
 | Change between songs | **handoff**: *give* (stock → person), *collect* (person → stock), *pass* (person → person), *capsule swap* |
-| Temporary pass with automatic return | **pass … and back** |
+| Person-to-person change during a song | **pass** (the return at the next song boundary is an ordinary handoff) |
 | Failed device replaced | **swap** / **on spare** |
 | Device unusable | **out of service** |
 | Device not returned | **missing** |
@@ -136,28 +158,28 @@
 
 ## 3. Data concepts this spec relies on
 
-These are deltas from the current schema. Full list in §19.
+**`docs/data-model.md` is authoritative.** In brief:
 
-- **Device usage.** Per device per song: holder (performer), or "not in use", or "spare".
-- **Pass.**
-  - Fields: device, from, to, song, **during** or **before**, optional "and back after".
-  - States: planned → done → returned.
-  - Holder during the song = *from* until the pass is marked done, then *to*.
-- **Handoff identity.** Every handoff has a stable ID derived from (device, from song ID, to song
-  ID or pass ID). It survives reorders and is re-validated after edits.
-- **Handoff states.** pending → done; **overdue** if the song moved on without it; **cancelled** if
-  the plan changed.
-- **Alert.** Fields:
-  - device;
-  - holder at raise, song at raise;
-  - type (from the §7.6 table), priority, failed component;
-  - repeat count, snoozed until song;
-  - owner (resolved per §7.3).
-- **Swap.** States: recorded → in hand → FOH confirmed. Records the failed component.
-- **Device.** Adds: owner (house / guest name), status (… missing, on loan), battery kind,
-  telemetry capability, board section and order, TBC fields.
-- **Show.** Adds: day, set (afternoon / evening), concert time, call time, **active** flag, linked
-  shows (Friday/Saturday, afternoon/evening).
+- **Devices** (Red, Bpack2, RX10, GLX 1) are global and shared by every show.
+- Each show has a **plot**: one row per device, one column per song plus **Default**, and a
+  person (or nobody) in each cell. A cell can also name a different capsule or headset.
+- **Holdings** record who physically has each device right now. They carry over between shows,
+  so afternoon → evening and Friday → Saturday just work.
+- **A handoff is any difference** between the planned holder for the target song and the
+  current holder. Doing it updates the holding. Nothing else is stored, so reorders, jumps,
+  going back and count-in never leave stale ticks.
+- **Passes** are person-to-person changes *during* a song (RX10 Helen → Shosh in *I Will Follow
+  Jesus*). The return at the next boundary is an ordinary handoff.
+- **Substitutions** cover:
+  - swaps: this song, until fixed, or **rest of show**;
+  - pulls (no replacement);
+  - guest replacements.
+
+  They overlay the plot without editing it.
+- **Alerts** belong to a device (or a TX/receiver) and record the holder and song at raise.
+- **Battery evidence** counts for a show only if recorded at or after that show's call time
+  − 2 h.
+- **Events** carry an IANA time zone. Every time is shown in it.
 
 ---
 
@@ -218,15 +240,20 @@ These are deltas from the current schema. Full list in §19.
 
 Every tile shows **usage** (one value) plus a **health overlay** (the highest value wins).
 
-**Usage:**
-- **In use**: assigned in the current song.
-- **Not this song**: assigned in a later song. Line: "Next: Song 3 → Judah".
-- **Done**: not used again this show.
-- **Spare**: designated spare, ready.
-- **On spare**: a spare currently replacing a failed device. Line: "for Red".
-- **Guest**: brought by a guest; owner shown.
-- **Out**: out of service. Diagonal hatching; stays in place.
-- **Missing**: count-in not returned.
+**Usage** (computed per `docs/data-model.md` §3.9; precedence out/missing > pulled > on spare >
+in use > collect > next > spare > done):
+- **In use:** planned in the current song.
+- **Next:** not used now, used later. Line: "Next: Song 3 → Judah".
+- **Collect:** not used again, but someone still holds it. Line: "Collect from Shosh".
+- **Done:** not used again and back in stock.
+- **Spare:** designated spare, ready.
+- **On spare:** replacing a failed device. Line: "for Red".
+- **Pulled:** failed with no replacement; the performer is off that channel. Line: "Pulled —
+  mute Ch 34". Plain background with a slashed-mic icon.
+- **Guest:** brought by a guest; owner shown.
+- **Suspect / Out:** reported faulty. Suspect has a dashed border; Out has diagonal hatching and
+  stays in place.
+- **Missing:** count-in closed without it.
 
 **Health**, highest first:
 - CRITICAL > WARNING > STALE DATA > MANUAL-DUE > OK.
@@ -361,10 +388,15 @@ The owner is the first of:
 ### 7.5 Sound and vibration
 
 - **Wall and FOH:** optional single tone for NEW critical only; off by default.
-- **Phones:**
-  - D5 = HTTP: phones don't alarm; the wall, FOH and comms carry alarms.
-  - D5 = HTTPS: the installed app gets notifications for criticals the phone owns.
+- **Phones (Web Push, VAPID).**
+  - After sign-in, the installed Home-Screen app asks once: "Get alerts for your devices?"
+  - Pushes are sent only for NEW CRITICAL alerts the phone's operator owns, plus swap cards for
+    FOH. Never for replayed history.
+  - Needs iOS 16.4+ with the app on the Home Screen; Android Chrome works in the browser too.
+  - Phones without push still show alerts when looked at. The wall, FOH and comms remain the
+    primary alarm path.
 - **iOS:** `navigator.vibrate` isn't available on iOS and is used only where supported.
+- **Keep awake:** wall and FOH screens hold a Wake Lock, re-acquired on visibility change.
 
 ### 7.6 Alert type table (the single source of priorities)
 
@@ -377,12 +409,19 @@ The owner is the first of:
 | Wrong pack / mic | Person | WARNING | Correct at next gap |
 | Sweat / cable / other | Person | WARNING | At next gap |
 | Battery not checked | Rule, show mode, device used later | WARNING (grouped) | Check before its song |
-| Handoff overdue | Rule (song passed, not done) | WARNING | Do it or cancel it |
+| Handoff overdue | Rule (difference against the current song) | WARNING | Done now, or Leave it |
+| Replacement needed later | Rule, one song before the clash | WARNING | Find another / reassign / tell FOH |
+| Swap: FOH confirm pending (FOH unreachable) | Rule | WARNING to the A2 | Tell FOH on comms |
 | Swap not confirmed by FOH | Rule (> 30 s) | WARNING to FOH | Confirm at console |
 | MIDI cue with no song | Rule | WARNING | Fix the cue or ignore |
 | MIDI bridge offline | Rule, show mode | WARNING | Advance by hand |
 | Playback jumped songs | Rule | NOTE | Read combined handoffs |
 | Screen offline / zone uncovered | Rule, show mode | NOTE | — |
+| Venue screens offline (phones still connected) | Rule | NOTE (one, combined) | Comms; FOH confirms later |
+| Song check (stale buffered cue) | Rule | WARNING to the Lead | Go / Stay |
+| Backup or R2 upload failing; disk < 25 % | Rule | WARNING to the Lead | Check /health |
+| Disk < 10 %; no R2 upload for 10 min in show mode | Rule | CRITICAL to the Lead | Act before data is at risk |
+| Login failures from the venue IP > 100 / 5 min | Rule | WARNING to the Lead | Check for abuse |
 | Interference / encryption mismatch / TX lost (Phase 5) | Telemetry | CRITICAL if in use now, else WARNING | Swap / check |
 
 ---
@@ -391,25 +430,37 @@ The owner is the first of:
 
 ### 8.1 Evidence shown on every device
 
+**Evidence rule.** A check counts for show S only if recorded at or after S's **call time − 2 h**.
+Times are in the event's time zone.
+
 | Situation | Tile shows |
 |---|---|
-| Never checked | "not checked" (neutral grey). Becomes ▲ CHECK BATT from call time, or in show mode, if used later in the show |
-| Checked today | "✓ OK 18:42 Sam" / "✓ fresh 18:40 Sam" |
-| Checked another day | "✓ Fri 19:02" (amber after call time) |
+| No valid check for this show | "not checked" (neutral grey). Becomes ▲ CHECK BATT from call time if the device is used later in the show |
+| Valid check | "✓ OK 18:42 Sam" / "✓ fresh 18:40 Sam" |
+| Check from an earlier show today | "checked for earlier show (13:02)": amber from call time, and not evidence |
+| Check from another day | "✓ Fri 19:02": amber from call time, and not evidence |
 | LOW | ▲ LOW (§7.6) |
 | Telemetry (Phase 5, ULX-D) | ▮▮▮▯▯ and minutes on SB900; bars on AA; "≈" if older than 60 s |
 | Can't report (XSW, GLX, IEM packs) | Manual evidence only, with a small "manual" tag |
 
 - **Battery kind.** Each device has a battery kind (AA alkaline / AA NiMH / AA lithium / SB900 /
   SB902). Checks record it automatically; it can be changed in the panel.
+- **Practice shows** never create evidence for a real show.
 
 ### 8.2 Battery service screen (wall and phone)
 
 - **Layout.** Devices in board order, filtered by **section** (Mics / IEM / Guitar) and **zone**
   (SL / SR / All).
-- **Cells.** Each cell has **✓ OK** (tap) and **Fresh** / **LOW** buttons.
-  - The first tap gives ✓ OK. Tapping again undoes it.
+- **Device zone.** The device's zone override, else the zone of its first planned holder in this
+  show.
+- **Cells.** Each cell has **✓ OK**, **Fresh** and **LOW**, plus a **Line ✓** column for mics
+  (talked into).
+  - Taps record a check immediately.
+  - **Undo** is offered for 10 s, and only to the operator who tapped. Someone else tapping the
+    same device just records a newer check.
   - There is no cycling toggle.
+- **Several people at once.** Two A2s can work the same section in parallel. Each sees the
+  other's ticks appear live, and the counter counts devices, not taps.
 - **Progress.** A counter reads "SL mics: 6/8 checked".
 - **No "all" shortcut.** Each check is a deliberate tap; 28 taps take about 40 s.
 - **Section done.** **"SL mics done"** is enabled only when every cell in the section has a state,
@@ -423,46 +474,61 @@ Call time defaults to **concert time − 1 h** (per the Homestead sheet) and is 
 
 ## 9. Handoffs
 
-### 9.1 Generated list
+### 9.1 What a handoff is
 
-Handoffs are generated from the plot and passes:
-- **give** (stock → person)
-- **collect** (person → stock)
-- **pass** (person → person)
-- **pass … and back**
-- **capsule swap**
+A handoff is any difference between **who should have a device** (the plot, passes and
+substitutions for the target song) and **who has it now** (the holding). `docs/data-model.md`
+§3.4–3.8 has the exact rules.
 
-### 9.2 Timing
+**Kinds and button labels:**
 
-- **"Before Song N":** due at the song boundary.
-- **"During Song N":** a pass. Appears as a NOW card when Song N becomes current, and is done
-  manually when the A2 taps **Pass done**. Marking it done changes the holder; the board, FOH and
-  alerts all follow.
-- **"After the show":** collects.
+| Kind | Label | Example |
+|---|---|---|
+| give | **Give Red to Helen** | Stock → Helen |
+| collect | **Collect Red from Helen** | Helen → stock |
+| pass | **Pass Red: Helen → Shosh** | Person → person |
+| capsule swap | **Fit KSM9 on Red** | Same holder, different element |
 
-### 9.3 States
+The single action button is **Done** (64 px). It writes the new holding, attributed and undoable
+for 10 s. The card's hint line names the physical act: "Hand it over, then tap Done".
 
-- **pending → done**, with who and when.
-- **Overdue:** the song moved past its due point without the handoff being done. It gets a
-  WARNING on the device; the options are **Done now** or **Cancel**.
-- **Cancelled:** the plan changed (§13). It shows struck through for 30 s with the reason.
+### 9.2 Targets and timing
 
-### 9.4 Jumps and going back
+- **Now:** differences against the **current song**. Normally empty. Anything here is
+  **overdue**: a WARNING on the device, with **Done now** and **Leave it** (a recorded exception
+  for this song, cleared at the next boundary).
+- **Coming up:** differences against the **next song**. This is "My next".
+- **During this song:** passes in the current song, as NOW cards with **Pass done**.
+- **Prep:** passes in the next song show one song ahead as "Get ready: RX10 Helen → Shosh during
+  *I Will Follow Jesus*".
+- **After the show:** collects, shown once the last song is current.
 
-- **MIDI or manual jump from song A to song C.** The handoffs shown are the *combined* change from
-  A to C. Handoffs belonging to the skipped song B that aren't needed by C are cancelled with the
-  reason "skipped".
-- **Going back (C → B).** RF Ops shows a "Reverse?" card listing what moves back. It never
-  auto-undoes completed handoffs; the A2 confirms each one or ignores it.
+### 9.3 Who sees which card
 
-### 9.5 Ticking
+- **Routing.** A card goes to the A2 who owns the **giving** side (holder now, or stock = the
+  device's zone).
+- **Passes across zones.** The receiver's A2 gets an info line ("RX10 coming to Shosh from SL").
+- **Wall:** shows all of them.
+- **Hygiene line,** when a device changes person: "Wipe handheld" for mics; "Own earpieces /
+  wipe pack" for IEM.
 
-- **Give and collect** also record checkout and return. These feed the count-in (§12.3) and the
-  "last holder".
-- **Pass done** records the holder change.
-- Each handoff card carries a **hygiene line** when the device changes person:
-  - "Wipe handheld" for mics.
-  - "Own earpieces / wipe pack" for IEM.
+### 9.4 Jumps, going back, reorders
+
+- **Jump (MIDI or manual, 2 → 4):**
+  - The new Now list is exactly the combined change; song 3's handoffs never appear.
+  - Passes in jumped-over songs are cancelled ("jumped").
+  - A pass in the departed song that wasn't done stays overdue only if its device still differs
+    from the new plan. Otherwise it is dropped.
+  - A jump never marks songs skipped, and needs no confirmation when it comes from MIDI.
+- **Going back (4 → 3):** the Now list shows what moves back. Nothing is undone automatically; each
+  card is done or left.
+- **Reorder** (Lead, show mode): only songs after the current one can move. Handoffs recompute.
+  Every A2 gets a plan-diff card (§13).
+
+### 9.5 Count-in and last holder
+
+- Holdings are the count-in (§12.3): anything not in stock at the end is still with its holder.
+- **Last holder** = the holding, plus its `since` and the song it changed in.
 
 ---
 
@@ -479,20 +545,38 @@ Handoffs are generated from the plot and passes:
 - **Candidates**, best first. Each is a 72 px card with chip, channel, battery evidence, location
   and receiver unit.
   1. Designated **spares** of the same type: battery ✓ or untested, not in use.
-  2. **Free devices** of the same type: not used in the current song. Labelled "free until
-     Song 5", or "free rest of show".
-  3. Same receiver unit as the failed one: labelled "same receiver" (acceptable, flagged).
-- **No candidate:** "No spare or free Red-type mic. Options: [Capsule swap / fix in place]
-  [Pull Red (mute at FOH)] [Tell FOH]". Each option logs and notifies FOH.
+  2. **Free devices** of the same type: not planned in the current song.
+     - Labelled "free until Song 5" (amber: "needed by Judah at Song 5") or "free rest of show".
+     - Choosing one that is needed later is allowed. One song before it is needed, RF Ops raises a
+       conflict WARNING: "Tan needed for Judah at Song 5; Red still out" [Find another]
+       [Give Judah a different mic] [Tell FOH].
+  3. **Same receiver unit** as the failed one: labelled "same receiver" (acceptable, flagged).
+  4. **Other form factor** (handheld ↔ bodypack/headset): a third tier, flagged "different mic
+     type — tell FOH".
+- **Capsule fix.** If a spare capsule or headset of the right type is in stock, the panel shows
+  "Capsule swap (2 spare capsules)". With none in stock it is hidden.
+- **No candidate:** "No spare or free Red-type mic." The options are:
+  - [Capsule swap] (if any spare);
+  - [**Pull Red**];
+  - [Tell FOH], hidden when the reporter *is* FOH.
+
+  Each option is logged and notifies FOH.
+- **Pull** means the performer carries on with no working device of that kind for the scope
+  chosen. The tile shows **Pulled — mute Ch 34**, and FOH gets a card: "Mute Ch 34 (Red, Helen).
+  No replacement." [Done at console].
 
 ### 10.3 Options (defaults shown)
 
 - **Scope:**
-  - **Until Red is fixed** (default): the holder stays on the spare for later songs until Red is
-    back in service and someone taps "Return to Red".
+  - **Until Red is fixed** (default): Helen stays on the spare for later songs until someone taps
+    **Return to Red**.
   - **This song only.**
-- **What failed:** Don't know / Mic / Capsule / Channel. If you pick one, it is marked out of
-  service.
+  - **Rest of show: replace Red with Bpack3.** Every later Red cell, whoever holds it, moves to
+    Bpack3. Use it when Red is dead for the night.
+- **What failed:** Don't know / Mic / Capsule / Channel.
+  - Picking one marks that part **suspect**, not out of service.
+  - **Out of service** is a separate Lead-only action in the device panel, with confirmation
+    (P8d).
 
 ### 10.4 Swap button
 
@@ -514,6 +598,14 @@ The button text is the full action: **"Swap Helen: Red → Bpack3 (Ch 43)"**.
 **IEM pack-only swaps:** the FOH card says "**Pack only — no console change**". FOH still taps
 Done (D2), so they know.
 
+**dLive line.** Mic swap cards add: "If Ch 43 isn't set like Ch 34, copy processing Ch 34 →
+Ch 43."
+
+**FOH unreachable** (venue screens offline, `docs/reliability.md` §3.4):
+- The swap goes straight to **FOH confirm pending**.
+- The A2 sees "Tell FOH on comms: *Helen to Ch 43, mute 34*".
+- FOH confirms from the pending cards when back.
+
 ### 10.6 Undo and return
 
 - **Undo:** allowed until In hand. After In hand, use "Reverse swap", which creates a new FOH card
@@ -525,23 +617,35 @@ Done (D2), so they know.
 
 ## 11. Offline and degraded operation
 
-Reliability reqs 12–17.
+Reliability §3 and reqs 13–18.
 
-- **STALE** (> 25 s without a server message):
-  - hatched status bar;
-  - telemetry greyed;
-  - risky actions (swap, song control, plot edits) disabled with "Reconnecting…".
-- **OFFLINE banner:** "OFFLINE since 20:14:05 — follow your paper sheet. Tell FOH on comms." The
-  board desaturates.
-- **Pending queue.** Low-risk taps (Batt OK / Fresh / LOW, handoff Done, Pass done, Problem)
-  are **queued** on the device:
+**Two causes, two wordings:**
+- **This device is offline:** "Your phone has no connection".
+- **The server is unreachable:** "Can't reach RF Ops".
+
+| State | Trigger | Behaviour |
+|---|---|---|
+| **STALE** | > 25 s with no server message | Hatched status bar; telemetry greyed. Risky actions (swap, song control, plot edits) are disabled with "Reconnecting…" |
+| **OFFLINE** | > 60 s | Banner: "OFFLINE since 20:14:05 — Tell FOH on comms." The board desaturates |
+| **Paper** | > 120 s | The banner adds "Follow your paper sheet" |
+
+- **Offline shell.** A service worker caches the app shell only, never data, so a reload while
+  offline still opens the app and shows OFFLINE instead of a browser error.
+- **Pending queue (IndexedDB).** Low-risk taps (Batt OK / Fresh / LOW, Line ✓, handoff Done,
+  Pass done, Problem) are queued on the device:
   - shown with a "⏳ not sent" badge;
   - sent automatically on reconnect, with the original time and song;
   - idempotent.
+- **Acked log.** Commands acknowledged in the last 15 min are kept for replay after a new epoch
+  (reliability §3.3).
 - **Reconnect summary.** "While you were offline: 3 changes, 1 alert", with a link to the log. A
-  critical alert on *my* devices that is still NEW notifies once.
-- **Song check.** If the bridge saw cues while the server was down (it logs them), or if Playback
-  is ahead, ask: **"Playback is on Song 4, RF Ops is on Song 2 → Go to Song 4?"**
+  critical alert on *my* devices that is still NEW notifies once. Replayed history never
+  toasts, vibrates or pulses.
+- **Venue screens offline** (phones on cellular): banner, swap "FOH confirm pending", and one
+  NOTE (reliability §3.4).
+- **Song check.** The agent posts its last buffered cue on reconnect. Under 10 s old, it is
+  applied; older, the Lead is asked: **"Playback moved to Song 4 while offline → Go to
+  Song 4?"**
 - **Paper fallback.** The pre-show checklist includes printing these from Show → Print (§15.3):
   - the plot;
   - each A2's handoff sheet;
@@ -571,47 +675,52 @@ The list is editable; defaults:
 
 ### 12.2 Changeover (between sets)
 
-1. Collect everything from the outgoing set (auto from collects)
-2. Wipe handhelds and packs; own earpieces
-3. Battery service for the incoming set
-4. ME-1 scene for the incoming set loaded (FOH)
-5. Switch the active show to the incoming set (confirm)
+1. **Collect** everything the incoming set doesn't use from the same person. Holdings carry over,
+   so a performer in both sets shows **"Keep with Helen for evening"** instead of a collect.
+2. Wipe handhelds and packs; own earpieces.
+3. Battery service for the incoming set (new evidence window: call − 2 h).
+4. ME-1 scene for the incoming set loaded (FOH).
+5. Switch the active show to the incoming set (confirm).
 
 ### 12.3 Post-show / count-in
 
-1. **Count-in:** every device ticked as returned. Any not ticked appear as **Missing** with:
-   - the last holder (photo, zone);
-   - the last song;
-   - the last event time.
-
-   Guest devices show "return to owner".
-2. Batteries out / rechargeables on charge
-3. Wipe down
-4. Faults reviewed (out-of-service list + notes)
-5. Report saved/printed
+1. **Count-in:** the list shows every device whose holding is not stock: the holder (photo, zone),
+   since when, and the song.
+   - **Collect** (Done) returns it.
+   - **Close count-in** (Lead) marks anything still out as **Missing**, keeping the last holder.
+   - Guest devices show "return to owner"; Done means returned to the owner.
+2. Batteries out / rechargeables on charge.
+3. Wipe down.
+4. Faults reviewed (suspect / out-of-service list, with notes).
+5. Report saved/printed.
 
 ---
 
 ## 13. Plan changes during the show
 
 - **Who can change what in show mode:**
-  - Lead: setlist (add / skip / reorder) and plot cells.
-  - A2s: skip only.
+  - **Lead:**
+    - setlist: add, skip, and reorder **songs after the current one**;
+    - plot cells for songs after the current one;
+    - passes.
+  - **A2s:** skip only.
   - Every change is attributed.
-- **Plan-diff card.** After any change, every A2 sees a **plan-diff card** with what changed for
-  them, for example:
-  - "RX10 pass moved: before Song 3 → during Song 5";
+- **Plan-diff card.** After any change, each A2 sees what changed for their cards, recomputed
+  from the handoff comparison, for example:
+  - "RX10 pass moved: Song 3 → Song 5";
   - "+1 give: Chandler ← Blue".
 
-  They acknowledge it with **Got it**.
+  They acknowledge it with **Got it**. FOH gets diff cards for console-relevant changes (channel or
+  person per channel).
 - **Program Change numbers belong to the song, not its position.**
   - Reordering never renumbers.
   - "Number 1, 2, 3…" is available in setup only and warns: "Make sure Playback's cues match."
 - **Last-minute guest device** (Lead or A2, allowed in show mode):
   - **Add guest device:** type, label, owner, and for IEM which TX/mix it listens to.
-  - It is created for this show only and appears in the board's Guest section.
-  - It can **replace** a planned device for a performer ("Chandler uses his own pack instead of
-    RX9"). RX9 becomes Done for this show, so it raises no battery alert.
+  - It exists for this show only and appears in the board's Guest section.
+  - **Replace** (a guest substitution): "Chandler uses his own pack instead of RX9" moves
+    Chandler's remaining RX9 cells to the guest device. RX9 becomes Done, with no battery alert.
+  - Labels are show-scoped, so "Chandler's pack" can exist on both days.
 
 ---
 
@@ -731,7 +840,7 @@ disabled on phones.
   - "↳" means the default applies.
 - **Visible buttons:** **Fill right**, **Copy column**, **Clear column**. Drag-to-fill is a
   shortcut only.
-- **Pass:** **Pass in this song…** on a cell creates a during-song pass (to whom, and back after?).
+- **Pass:** **Pass in this song…** on a cell creates a during-song pass (to whom). The return at the next song is automatic.
 - **Conflicts:** red cells with the reason in the cell tooltip and in a list under the grid.
 - **Person view:** a toggle (person rows), read-only.
 - **Show mode:** locked except for the Lead (§13).
@@ -775,7 +884,7 @@ disabled on phones.
 
 ### 15.6 MIDI, Data
 
-As built, plus the health page link (reliability req 26).
+As built, plus the health page link (reliability req 27).
 
 ---
 
@@ -831,91 +940,106 @@ Report sections, in this order:
 
 ---
 
-## 19. Data model and API deltas
+## 19. Data model and API
 
-**Tables / fields:**
-- **performers:** `photo_path`, `zone_id`, `absent_show_ids`; **zones** table.
-- **equipment:**
-  - `owner`, `section`, `board_order`, `battery_kind`, `telemetry_capability`, `tbc_fields`;
-  - status adds `missing`, `on_loan`;
-  - `show_id` for guest devices.
-- **shows:** `day`, `set_name`, `concert_time`, `active` (one row), `event_id` (groups linked
-  shows).
-- **passes:** id, show, device, from, to, song, timing (before/during), `and_back`, state, done
-  by/at, returned by/at.
-- **handoff_state:** stable `handoff_key`, state (pending/done/overdue/cancelled), reason,
-  by/at. Replaces `handoff_done`.
-- **alerts:**
-  - `type`, `holder_at_raise`, `song_at_raise`, `failed_component`;
-  - `repeat_count`, `snoozed_until_song_id`, `owner_operator_id`, `on_it_by/at`.
-  - The device is required for device alerts.
-- **swaps:** `state` (recorded/in_hand/foh_confirmed/reversed), `in_hand_at/by`,
-  `foh_confirmed_at/by`, `failed_component`, `scope` (until_fixed/song).
-- **battery_checks:** `battery_kind`, `line_check` (bool), `section_closed_by`.
-- **checklists / checklist_items / checklist_ticks.**
-- **messages:** phrase, device, from, to, urgent, `acked_at/by`.
-- **client_sessions:** presence. **join_codes.** **epoch** (standby).
-- **Optimistic concurrency:** `version` on equipment, kits, assignments, songs and alerts.
+The tables, derived values, invariants and migration are in **`docs/data-model.md`**, which wins
+over any wording here.
 
-**Endpoints** (new):
-- Active show
-- Passes CRUD + done/return
-- Handoff state
-- Swap in-hand / foh-confirm / reverse / return
-- Alerts on-it / snooze / repoint-to-TX
-- Guest device
-- Count-in / missing / found
-- Checklists
-- Messages + ack
-- Photo upload
-- Join code
-- Presence
-- Plan diff (event)
-- Print views
-- Compare / apply-to shows
-- Health
-- Practice show
+**Endpoints.** All require a session, except as noted in hosting §Security 1. Every mutation
+takes an idempotency key and, for edits, the expected `version`.
 
-**Events** (new): `tick` (heartbeat, server_time, epoch). Clients never notify on events older
-than their last seen sequence, except still-NEW criticals they own (once).
+| Area | Endpoints |
+|---|---|
+| Auth | sign in, sign out, join (code), enrol screen, revoke, re-issue codes, `whoami` |
+| Events / shows | active show, show mode, songs (reorder after current, skip), practice copy, compare / apply-to, print views |
+| Devices | CRUD, guest device, status (suspect / out / missing / found) |
+| Plot | cells (set, fill right, clear), passes CRUD, pass done |
+| Holdings | handoff Done (give / collect / pass / capsule), Leave it, count-in, close count-in |
+| Substitutions | swap (scope), pull, in hand, FOH confirm, reverse, return, rest-of-show |
+| Alerts | report, on it, fixed, snooze, re-point to TX |
+| Battery | check, line check, section done |
+| Checklists, messages | tick / untick, send, ack |
+| People | photo upload, zones, absences |
+| Live | snapshot, `/api/ws`, presence, `/api/midi` (agent key, with `cued_ms_ago`) |
+| Admin | health detail, backups (list, now, restore from local / R2 / file), export, takeover (standby) |
+
+**WebSocket messages:** `hello {seq, server_time, epoch}`, `event`, `resync`,
+`tick {seq, server_time, epoch}`.
+- Clients never notify for events with seq ≤ the hello seq, except still-NEW criticals they own
+  (once).
+- A new epoch triggers acked-command replay (reliability §3.3).
 
 ---
 
 ## 20. Acceptance tests
 
-Automated in Rust and Playwright unless marked (manual).
+Automated in Rust and Playwright unless marked (manual). Thresholds are pass/fail.
 
 1. **Speed.**
-   - Raise → visible everywhere < 1 s.
-   - Swap → FOH card < 1 s.
-   - Batt OK 2 taps; swap 3 taps from an alert; report 2 taps from a FOH row.
-2. **Stable layout.** Tile boxes are identical across every song change and every alert state.
-3. **No status colour when healthy.** A pixel scan of the healthy state, excluding chip stripes,
-   finds no status red or amber.
-4. **Colour-blind.** Every state is identifiable in greyscale and in simulated deuteranopia /
-   protanopia (word + glyph present). Manual review checklist plus automated DOM checks.
-5. **Replay.** A fresh load never toasts, vibrates or pulses for old events. A still-NEW owned
-   critical notifies once.
+   - Raise → visible on 3 other clients: p95 < 1 s over 200 trials, against the deployed URL.
+   - Swap → FOH card: p95 < 1 s over 200 trials.
+   - Tap counts: Batt OK 1 tap in battery service; swap 3 taps from an alert; report 2 taps from
+     a FOH row.
+2. **Stable layout.** Tile bounding boxes are identical (±0 px) across every song change and every
+   alert state in the seeded show.
+3. **No status colour when healthy.** A pixel scan of the healthy state finds no pixel within
+   ΔE2000 < 10 of status red or amber, excluding chip stripes.
+4. **Colour-blind.** Every state carries a word and glyph in the DOM. Greyscale and simulated
+   deuteranopia/protanopia screenshots are reviewed (manual checklist).
+5. **Replay.** A fresh load with 50 historic events never toasts, vibrates, pushes or pulses. A
+   still-NEW owned critical notifies exactly once.
 6. **Grouping.** 28 rule alerts produce ≤ 5 rows plus a group row.
 7. **Passes.** RX10 pass during *I Will Follow Jesus*:
-   - before Pass done, the holder is Helen and the alert follows RX10;
+   - before Pass done, the holder is Helen and an alert raised on RX10 shows Helen;
    - after Pass done, it is Shosh;
-   - the return happens at the boundary.
-8. **Overdue handoffs.** MIDI jump 2 → 4: handoffs show the combined change; skipped-only
-   handoffs are cancelled with "skipped"; an un-ticked pass becomes overdue.
-9. **Offline queue.** Phone offline → Batt OK and Done are queued with a badge → reconnect → applied
-   once, with the original song.
-10. **Swap flow.** Recorded → In hand → FOH Done; the IEM pack-only wording; undo before In hand;
-    reverse after it.
-11. **Plan diff.** A lead reorder in show mode produces per-A2 diff cards; PC numbers unchanged.
-12. **Guest device.** Add Chandler's pack replacing RX9: RX9 is Done with no battery alert.
-13. **Count-in.** A missing device shows the last holder and song.
-14. **Touch.** Wall targets ≥ 64 px; phone primary ≥ 48 px; Done/Problem ≥ 64 px.
-15. **Contrast.** Text ≥ 4.5:1; wall primary and alert ≥ 7:1 (automated contrast audit).
-16. **Reliability.** All requirements in `docs/reliability.md` §5.
-17. **Volunteer test (manual).** A first-time helper, with the 3-card intro only, completes:
+   - at the next song, "Pass RX10: Shosh → Helen" is the only RX10 handoff.
+8. **Jumps.** MIDI 2 → 4:
+   - the Now list equals planned(4) vs holdings;
+   - no song-3 cards;
+   - jumped passes cancelled;
+   - no songs marked skipped.
+
+   Going back 4 → 3 lists the reverse moves and changes nothing until Done.
+9. **Reorder.** Reordering songs after the current one recomputes handoffs, keeps PC numbers and
+   produces per-A2 diff cards. Reordering the current or earlier songs is refused.
+10. **Carry-over.** Afternoon → evening with the same performer shows "Keep with Helen for
+    evening" and no collect/give pair.
+11. **Rest of show.** "Replace Red with Tan for rest of show" moves every later Red cell to Tan.
+    A Tan clash at Song 5 raises a WARNING at Song 4.
+12. **Pull.** Pull Red: the tile shows Pulled, FOH gets a mute card, and Red raises no battery
+    alerts.
+13. **Evidence window.** An afternoon check shows "checked for earlier show" in the evening and
+    doesn't satisfy battery-not-checked.
+14. **Offline queue.** Phone offline → Batt OK and Done queued with a badge → reload while offline
+    shows the shell + OFFLINE → reconnect → applied once, with the original song.
+15. **Epoch replay.** Restore a backup missing 3 acked commands → clients replay → 2 apply and 1
+    conflicts (listed once).
+16. **Swap flow.**
+    - Recorded → In hand → FOH Done;
+    - pack-only wording;
+    - undo before In hand, reverse after it;
+    - FOH-confirm-pending when every venue screen is offline.
+17. **Guest device.** Add Chandler's pack replacing RX9: RX9 is Done with no battery alert;
+    Chandler's later RX9 cells move.
+18. **Count-in.** Close count-in marks outstanding devices Missing with the last holder and song.
+19. **Practice isolation.** Actions in a practice copy change no real holdings, checks, alerts or
+    equipment status. A MIDI cue doesn't move it.
+20. **Auth.**
+    - Every endpoint except the listed public ones returns 401 without a session (GET and the WS
+      included).
+    - A join code works on 3 devices, then fails; it fails after 2 h.
+    - 5 wrong PINs lock that name on that device only.
+    - A screen credential survives 8 days while in show mode.
+    - Revocation takes effect on the next request.
+21. **Headers.** CSP, HSTS, `frame-ancestors`, Origin rejection on a cross-site WS upgrade.
+22. **Touch.** Wall targets ≥ 64 px; phone primary ≥ 48 px; Done/Problem ≥ 64 px (DOM measurement).
+23. **Contrast.** Text ≥ 4.5:1; wall primary and alert ≥ 7:1 (automated contrast audit).
+24. **Reliability.** All requirements in `docs/reliability.md` §4.
+25. **Migration.** The current HF 2026 database migrates to v3 with an identical per-song
+    effective assignment for every performer and song, and Helen/Shosh becomes one pass.
+26. **Volunteer test (manual).** A first-time helper, with the 3-card intro only, completes:
     battery service for their section, a give, a pass, and a Problem report, without help.
-18. **Crew review (manual).** Two A2s and the FOH engineer run the practice show before the first
+27. **Crew review (manual).** Two A2s and the FOH engineer run the practice show before the first
     real use.
 
 ---
@@ -947,7 +1071,7 @@ Automated in Rust and Playwright unless marked (manual).
 | Vocabulary "pass" | §2 |
 | Hygiene | §9.5, §12.2 |
 | TBC visual | §5.2 |
-| Volunteer card | §1.1 3-card intro + §20.17 |
+| Volunteer card | §1.1 3-card intro + §20.26 |
 | Message read receipts | §17 |
 | Not here tonight | §15.4 |
 | Hardware: TX_DEVICE_ID not on ULXD1/2 | Wrong-pack check is manual (preset); `docs/hardware-integration.md` §1 |
@@ -957,19 +1081,94 @@ Automated in Rust and Playwright unless marked (manual).
 
 ## 22. Build order
 
-1. **Reliability foundation:** DB pragmas, atomic backups, LaunchDaemon, heartbeat/STALE, resume,
-   server time, health page, presence.
-2. **Data model:** passes, handoff state, alert fields, swaps states, devices/people/shows fields,
-   active show, plus migrations and seeds (HF template updated with sections and battery kinds).
+1. **Reliability foundation** [done, server side]: DB pragmas, verified/pinned backups, startup
+   recovery, heartbeat tick, epoch, presence, health, SIGTERM.
+   - **Client side:** STALE / OFFLINE / paper states, resume, server-time offset, no alarms for
+     replayed history.
+   - **Retention:** 20 local automatic backups and free-space percentages.
+1b. **Security and cloud:**
+   - signed cookie sessions and sign-in on everything;
+   - mandatory PINs and the first-admin env/CLI;
+   - join codes and screen credentials;
+   - per-name/device rate limits, Origin checks, headers and CSP;
+   - hashed agent key;
+   - R2 upload and the fencing lease;
+   - `render.yaml`.
+2. **Data model v3:** devices, plot cells, passes, substitutions, holdings, events/time zone,
+   evidence window, practice scope, operators/screens, plus migration 0005 from today's schema.
+   - Core functions: planned, handoffs, usage, conflicts.
+   - Tests: Helen/Shosh, MIDI jump, rest-of-show, carry-over.
 3. **Shared UI:** status bar, song strip (hold-to-advance), activity line + undo, alert
    column/strip + critical band, device tile, device panel, problem presets.
-4. **Wall board** + next handoffs + battery service.
-5. **Swap** (two-step) + FOH channels + swap cards.
-6. **Phone tabs** + offline queue + plan-diff cards + onboarding (join code, intro).
-7. **Admin:** plot (passes, fill right), devices table, show (day/set, print, compare/apply),
-   people (photos, zones, absent), operators (helpers, practice).
-8. **Checklists**, count-in / missing, quick messages, report.
+4. **Wall board,** next handoffs and battery service.
+5. **Swap** (two-step, pull, rest of show), FOH channels and swap cards.
+6. **Phone tabs,** offline queue + acked log, plan-diff cards, onboarding (join, intro), and
+   Web Push.
+7. **Admin:**
+   - plot (passes, fill right);
+   - devices;
+   - show (day/set, print, compare/apply, practice);
+   - people (photos, zones, absent);
+   - operators and screens.
+8. **Checklists,** count-in / missing, quick messages, report.
 9. **Full acceptance suite** (§20) + reliability tests + soak + screenshots for crew review.
+10. **Deploy** to Render with the owner (hosting §Owner setup steps), plus the restore and standby
+    drills.
 
 Then Phase 5 telemetry attaches to the tile's battery/RF row and the §7.6 rules, with no layout
 changes.
+
+---
+
+## 23. v2 → v3 change log (second independent review)
+
+### Blockers (all resolved)
+
+| # | Finding | Resolution |
+|---|---|---|
+| 1 | Devices were per-show kits | Global `devices` + `show_devices` overrides; migration 0005 step 3 (data model §2, §5) |
+| 2 | Person/kind override model couldn't express the plot | `plot_cells` device × song + Default; passes table; migration steps 4–5 |
+| 3 | Handoffs stored as ticks went stale on reorder/jump | **Holdings** are physical truth; handoffs are computed differences (data model §3.4) |
+| 4 | Failed device used later in the show | Swap scope **Rest of show**; "free until Song N" + clash WARNING one song ahead (§10.2–10.3) |
+| 5 | Pull undefined; spare capsules; "Tell FOH" to FOH | Pull = substitution with no replacement, tile "Pulled — mute Ch N", FOH card; capsule count; Tell FOH hidden for FOH (§10.2) |
+| 6 | iOS Home-Screen cookie isolation broke join | Code works for that helper on 3 devices for 2 h, with manual 6-digit entry (§1.1) |
+| 7 | Join code length/lifetime inconsistent | 6 digits, per named helper, 2 h; kiosk QR 60 s after Lead PIN; re-issue all (§1.1, hosting §Security 3) |
+| 8 | Wall/FOH sessions expire mid-show; no attribution | Screen credentials (7 days, sliding, never expire in show mode, revocable); "Wall (Sam)" (§1.1) |
+| 9 | Per-IP lockout locks out the whole venue | Per name + device limits; IP cap only alerts (hosting §Security 6) |
+| 10 | "Any name" bootstrap on the public internet | Removed; first Lead from env/CLI; PIN-less operators can't write (hosting §Security 2) |
+| 11 | Practice show could touch real data | Scope on holdings, checks, alerts, substitutions; MIDI ignored; never active (data model §4) |
+| 12 | Venue internet down, phones on cellular | "Venue screens offline" banner, FOH-confirm-pending, one NOTE (reliability §3.4) |
+| 13 | Cues lost while the agent was disconnected | Last-cue buffer; < 10 s applies, else Song check (reliability §3.5) |
+| 14 | Standby had split-brain risk and logged everyone out | Cloudflare proxied CNAME flip + R2 fencing lease + shared signing key + client replay (reliability §3.3, §3.6) |
+| 15 | Retention didn't fit the disk | 5 GB disk; 20 local automatic backups + 30-day pinned; R2 long-term; 25 % / 10 % thresholds (reliability §2.2) |
+| 16 | Times without a time zone | `events.timezone`; UTC storage; display in event zone (data model §2) |
+| 17 | Battery checks from the afternoon counted for the evening | Evidence valid only from call − 2 h (§8.1) |
+
+### Other findings (decisions adopted)
+
+| # | Decision | Where |
+|---|---|---|
+| 18 | Parallel battery taps; undo only by the same operator within 10 s; device zone rule; Line ✓ column | §8.2 |
+| 19 | One "Done" verb; "Collect from X" usage | §5.1, §9.1 |
+| 20 | Pass routing (giver's A2 card, receiver's info); prep one song ahead; return is a normal handoff | §9.2–9.3 |
+| 21 | Jumped-over passes cancelled; departed-song passes overdue only if still different; MIDI jumps unconfirmed | §9.4 |
+| 22 | Reorder only after the current song; FOH diff cards | §13 |
+| 23 | Guest replace moves the remaining cells; show-scoped labels | §13 |
+| 24 | Helper permissions | §1 table |
+| 25 | Swap marks *suspect*; out of service is Lead-only; other form factor as a third tier | §10.2–10.3 |
+| 26 | STALE 25 s / OFFLINE 60 s / paper 120 s; device vs server wording | §11, reliability §3.1 |
+| 27 | Service worker shell only; IndexedDB queue | §11 |
+| 28 | Web Push via VAPID; HTTP branch dropped | §7.5 |
+| 29 | Presence severity = NOTE | §7.6, reliability req 20 |
+| 30 | "Keep with X for evening" changeover | §12.2 |
+| 31 | Count-in from holdings; "Close count-in" → Missing | §12.3 |
+| 32–33 | Alerts, swaps and shows migrations | data model §5 steps 7–8 |
+| 34 | CSP `style-src 'unsafe-inline'` | hosting §Security 10 |
+| 35 | Health detail Lead-only | hosting §Security 7 |
+| 36 | Stale LAN / LaunchDaemon / HTTP text purged | reliability (rewritten), spec, hosting. Operations is flagged as dev/rehearsal-only until step 10; README auth text changes with step 1b |
+| 37 | Retention conflict | reliability §2.2 |
+| 38 | Cellular survey per venue | reliability §5 Phones |
+| 39 | Lenient Render health check | reliability req 9 |
+| 40 | Verb labels and hint lines | §9.1 |
+| 41 | dLive "copy processing" line | §10.5 |
+| 42 | Measurable tests | §20 |

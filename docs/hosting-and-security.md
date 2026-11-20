@@ -59,101 +59,128 @@ Cloudflare is still used for DNS and for **R2 off-site backups**.
 **Latency.** Internet round-trips (typically 20–80 ms) sit well inside the < 1 s screen-update
 target. This is confirmed by the e2e timing tests run against the deployed URL.
 
-## Backups and the "standby"
+## Backups and the standby
 
-- **Same as before:** verified backups (`VACUUM INTO` → quick_check → rename) every **2 min in
-  show mode** and every 15 min otherwise.
-- **New:** each backup is uploaded to a **Cloudflare R2** bucket. Pinned show-start backups are
-  kept 90 days; automatic ones 14 days.
-  - These are app-level uploads, not Litestream's continuous replication. That keeps R2
-    operation counts and cost predictable.
-- **Standby (D7, cloud form):** a second Render service, **"rfops-standby"**, is defined in the
-  Render Blueprint but kept suspended. The runbook:
-  1. Resume `rfops-standby`. It restores the newest verified R2 backup on boot.
-  2. Move the custom domain to it in Render (or flip a Cloudflare CNAME).
+Full detail is in `docs/reliability.md` §2.2 and §3.6.
 
-  Target: back online in **under 10 minutes**, losing at most 2 minutes of changes.
-  - It protects against a broken instance, corrupt disk or bad deploy.
-  - It doesn't protect against a full Render region outage.
-  - Practise it once before the event.
+**Backups:**
+- Verified backups every **2 min in show mode** and every 15 min otherwise. Each is uploaded to a
+  private **Cloudflare R2** bucket straight after writing.
+- **Retention on the 5 GB persistent disk:** newest 20 automatic backups, and pinned backups for
+  30 days.
+- **Retention in R2** (lifecycle rules): automatic 14 days, pinned 90 days.
+- These are app-level uploads, not Litestream's continuous replication, so R2 operation counts
+  and cost stay predictable.
+
+**Standby (D7, cloud form):**
+- A second Render service, `rfops-standby`, is in the Blueprint and kept suspended.
+- A fencing **lease** object in R2 (epoch and holder, renewed with conditional PUT) guarantees
+  only one service accepts writes.
+- Cloudflare serves `rfops.<domain>` as a **proxied** CNAME, so moving it to the standby takes
+  seconds.
+- Both services share the session-signing key, so nobody has to sign in again.
+- Clients replay commands acknowledged in the last 15 min, which recovers the gap since the last
+  backup.
+- **Target:** back online in **under 10 minutes**.
+- It covers a broken instance, corrupt disk or bad deploy. It does not cover a full Render
+  region outage; that falls back to paper.
+- Drill it once before the event.
 
 ## Security (now on the public internet)
 
-Every requirement is testable.
+Every requirement is testable. The data structures are in `docs/data-model.md` §2 (operators,
+sessions, screens).
 
-1. **Everything requires sign-in:** every page, API call (GET included), photo and WebSocket. The
-   only exception is `/api/health`, which returns status only and no data.
-2. **Sign-in:**
-   - Every operator has a PIN (no name-only sign-in).
-   - Helpers join with a single-use **join code** that expires.
-   - Sessions are **HttpOnly, Secure, SameSite=Strict cookies**, replacing today's header
-     tokens. The default lifetime is 18 h; the Lead can revoke them.
-3. **Rate limits:**
-   - Login: 5 tries per 5 min per IP and per name, then a lockout with backoff.
-   - API: per-session limits.
-   - Join codes: about 1 million combinations (6 digits), single use, 2-hour expiry.
-4. **Roles enforced on the server** for every mutation (as today), and **read scoping**:
-   - Viewers can't see PINs, keys or other operators' sessions.
-   - Admin endpoints are admin-only.
-5. **Agent keys:**
-   - The on-site agent uses a per-site key, which can be rotated (as built).
-   - The key is sent only over HTTPS.
-   - The agent can only post MIDI and telemetry; it can't read show data.
-6. **Transport:** HTTPS only, HSTS, no plain-HTTP endpoints. WebSockets use `wss://` and check
-   `Origin`.
-7. **Headers:**
-   - Content-Security-Policy: same-origin scripts only, no inline scripts.
-   - `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, `Permissions-Policy` limited to
-     camera (photo capture).
-8. **Data:**
-   - Performer photos are served only to signed-in users, from the private disk.
-   - Uploads are resized and re-encoded server-side, with EXIF/location stripped.
-   - R2 bucket private; backup objects are encrypted at rest (R2 default).
-9. **Secrets:**
-   - The agent key, R2 credentials and session-signing key live in Render environment
-     variables, never in the repo or the database.
-   - The bridge key (stored in the DB today) moves to a hashed form.
-10. **Audit:** sign-ins, failed sign-ins, role changes, key rotations and exports are recorded in
-    the event log and the report.
-11. **Dependencies:** `cargo audit` and `npm audit` run in CI. Versions are pinned (as now).
-12. **Privacy:** only names, roles, zones and photos of performers are stored, and an event can be
-    deleted completely (data and backups) after the season.
-
-## What changes in other documents
-
-- **`docs/reliability.md`:**
-  - The "server Mac" items (sleep, LaunchDaemon, macOS updates, UPS) apply only to the
-    **Playback MacBook running the agent**.
-  - Server items become:
-    - Render paid instance with persistent disk;
-    - deploy freeze;
-    - SIGTERM handling;
-    - R2 backups;
-    - standby service;
-    - an external uptime check (for example, Cloudflare health checks or an uptime monitor on
-      `/api/health`).
-- **`docs/interface-spec.md`:** D5 resolved by real HTTPS; D6 = Render; D7 = cloud standby.
-- **`docs/operations.md`:** the install steps become a Render Blueprint (`render.yaml`) plus a
-  Cloudflare DNS record. The Mac LaunchAgent for the server is retired. The Mac setup remains for
-  the agent.
+1. **Everything requires sign-in:** every page, API call (GET included), photo and WebSocket.
+   Exceptions:
+   - `/api/health` returns `{ok, version, epoch}` only;
+   - the sign-in, join and screen-enrol endpoints;
+   - the agent's `/api/midi` (and later telemetry), which uses the agent key.
+2. **Operators:**
+   - **Every non-helper operator has a PIN** (4–8 digits, argon2). There is no "any name" mode.
+   - The **first Lead** is created on first start from `RFOPS_ADMIN_NAME` / `RFOPS_ADMIN_PIN`, or
+     the `rfops-server --create-admin` CLI.
+   - If a migrated operator has no PIN, every write by that operator is refused until the Lead
+     sets one.
+3. **Helpers (join codes):**
+   - The Lead creates a named helper ("Jo, SL batteries"). Its **6-digit join code** works for
+     that helper on **up to 3 devices within 2 h**.
+   - The code is shown as a QR plus digits for manual entry. Manual entry matters because iOS
+     Home-Screen apps keep their own cookies, separate from Safari: a helper who scanned in
+     Safari and then added the icon must type the code again in the app.
+   - The kiosk QR is shown only for 60 s after a Lead enters their PIN.
+   - **Re-issue all helper codes** invalidates every outstanding code.
+4. **Screens (wall, FOH):**
+   - Enrolled by a Lead with a named **screen credential**: 7 days, sliding, revocable, and never
+     expiring while a show is in show mode.
+   - Actions are attributed "Wall", or "Wall (Sam)" when someone tapped their name chip in the
+     last 5 min.
+5. **Sessions:**
+   - **Signed, stateless cookies:** HMAC with `RFOPS_SESSION_KEY`, shared by active and standby.
+     They are `HttpOnly; Secure; SameSite=Strict`.
+   - 18 h sliding, and never expiring while in show mode.
+   - Revocation is a DB list of revoked session IDs plus per-user `sessions_valid_after`.
+6. **Rate limits:**
+   - **Sign-in:** 5 failures per 5 min **per name and per device ID**, then lockout with backoff.
+   - **Per IP:** only a 100 failures / 5 min cap that raises a WARNING. It never locks out,
+     because the whole crew shares the venue's single public IP.
+   - **API:** per-session limits.
+   - **Join codes:** 6 digits, ≤ 3 uses, 2 h, with the same failure limits.
+7. **Roles** are enforced on the server for every mutation, with read scoping:
+   - helpers see only their zone tasks;
+   - viewers can't see PINs, keys or sessions;
+   - `/api/health/detail` and Admin are Lead-only.
+8. **Agent key:**
+   - Per site and rotatable; **stored hashed**, and the plain key is shown once at creation.
+   - HTTPS only.
+   - The agent can post MIDI and telemetry only; it cannot read show data.
+9. **Transport:** HTTPS only, HSTS, no plain-HTTP endpoints. WebSockets use `wss://`, and the
+   server checks `Origin` on the upgrade and on every state-changing request.
+10. **Headers:**
+    - CSP: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'` (Svelte
+      transitions use inline styles); `img-src 'self' blob: data:`; `connect-src 'self'`;
+      `frame-ancestors 'none'`.
+    - `Referrer-Policy: same-origin`.
+    - `Permissions-Policy: camera=(self)`.
+11. **Data:**
+    - Photos are served only to signed-in users. They are re-encoded server-side, with EXIF and
+      location stripped.
+    - The R2 bucket is private.
+12. **Secrets** (agent key, R2 credentials, session key, VAPID keys) live in Render environment
+    variables, never in the repo.
+13. **Audit:** sign-ins, failures, role changes, key rotations, enrolments, revocations, restores
+    and exports are written to the event log and shown in the report.
+14. **Dependencies:** `cargo audit` and `npm audit` in CI; versions pinned.
+15. **Privacy:** only names, roles, zones and photos are stored. Deleting an event removes its
+    data and, through R2 lifecycle, its backups.
 
 ## Costs (estimate; check current pricing)
 
 | Item | Approx. cost |
 |---|---|
 | Render web service, Starter instance | about $7 / month |
-| Render persistent disk, 1 GB | about $0.25 / month |
-| Cloudflare R2 | free tier likely covers it: 10 GB storage, 1 M class-A ops/month. At one upload every 2 min, a 5-hour show is about 150 uploads |
+| Render persistent disk, 5 GB | about $1.25 / month |
+| Cloudflare R2 | the free tier likely covers it (10 GB, 1 M class-A ops/month) |
+| Standby service | suspended; verify Render's charge for a suspended service with a disk |
 | Domain | already owned |
-
-Standby service: no charge while suspended (verify).
 
 ## Owner setup steps
 
-To do when building, with the owner's accounts:
-1. Create the Render service from the repo's `render.yaml` (Blueprint).
-2. Add the Cloudflare DNS CNAME `rfops.<domain>` → the Render hostname, and add the custom domain
-   in Render.
-3. Create an R2 bucket and an R2 API token, and put them in Render environment variables.
-4. Set the agent key on the Playback MacBook.
-5. Run the restore drill once.
+To do with the owner's accounts:
+1. **Render:** create the services from the repo's `render.yaml` (Blueprint). Auto-deploy off.
+2. **Environment variables** (both services):
+   - `RFOPS_ADMIN_NAME`, `RFOPS_ADMIN_PIN` (first start only)
+   - `RFOPS_SESSION_KEY` (shared)
+   - `RFOPS_TZ` (e.g. America/Chicago)
+   - `RFOPS_PUBLIC_ORIGIN` (`https://rfops.<domain>`)
+   - R2 endpoint, bucket, key and secret
+   - VAPID keys
+3. **Cloudflare:**
+   - DNS: a **proxied** CNAME `rfops.<domain>` → the active service's onrender.com host. Add the
+     custom domain in Render.
+   - SSL mode **Full (strict)**.
+4. **R2:**
+   - Create a private bucket, plus an API token scoped to it.
+   - Lifecycle rules: `auto/` 14 days, `pinned/` 90 days.
+5. **Agent:** set the agent key on the Playback MacBook.
+6. **Drills:** run the restore drill and the standby drill once.

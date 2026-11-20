@@ -1,278 +1,323 @@
-# Reliability plan
+# Reliability plan (v3, cloud)
 
-> **Hosting changed:** RF Ops now runs on Render (`docs/hosting-and-security.md`).
->
-> - **Server-Mac items** (§2 rows 2–4, §3, §6 "Server Mac") now apply only to the **Playback
->   MacBook running the on-site agent**.
-> - **Server equivalents:**
->   - Render paid instance;
->   - deploy freeze on show days;
->   - SIGTERM handling;
->   - R2 off-site backups;
->   - suspended standby service;
->   - an external uptime check.
-> - **HTTPS (§4)** is resolved by Render's certificate.
-> - **New risk:** venue internet loss. It has the same effect as the server dying, and the same
->   response: the paper fallback.
+The goal is that the show never depends on RF Ops being up, while RF Ops stays up for the whole
+show.
 
-Goal: the show never depends on RF Ops being up, but RF Ops is up for the whole show.
+**Where things run:**
+- RF Ops runs on **Render**: one paid instance with a persistent disk. DNS and the R2 backup
+  bucket are on **Cloudflare** (`docs/hosting-and-security.md`).
+- On site, the only RF Ops software is the **agent** (`rfops-bridge`) on the Playback MacBook. It
+  handles MIDI now; Phase 5 adds Shure telemetry.
+- Every screen is a browser.
 
 **Tags:**
-- **[have]** = already built. **[add]** = in the build plan.
-- **V** = verified source. **I** = inference. Sources at the end.
+- **[have]** = built and tested; **[add]** = in the build plan.
+- **V** = verified source; **I** = inference.
 
-## 1. Gaps found in the current build
-
-1. **Stale data shows as live.** A half-open WebSocket (phone woken from sleep, AP roam) can show
-   "● Live" over stale data. The server pings but never checks the pong, and the client has no
-   heartbeat.
-2. **Power loss can drop a swap.** SQLite runs WAL with `synchronous=NORMAL`, so "a transaction
-   committed … might roll back following a power loss" (V). A swap could vanish. macOS fsync
-   doesn't flush the drive cache without `fullfsync` (V).
-3. **No database health checks.** There is no `busy_timeout`, no startup `quick_check`, and no
-   checkpoint management.
-4. **Backups are weak.**
-   - VACUUM INTO writes straight to the final file name, so an interrupted backup looks valid.
-   - There is no verification.
-   - The show-start backup can be rotated away the same day (40 files kept).
-   - Backups are never copied off the machine.
-5. **No server after reboot.** The server is a LaunchAgent, so it only runs while someone is
-   logged in. FileVault (on by default in recent macOS) disables auto-login, so after an
-   unattended reboot there is no server (V).
-6. **Clock skew.** `hello.server_time` is never used, so client clock skew distorts banners and
-   ages.
-7. **No graceful stop.** There is no SIGTERM handler, logs aren't rotated, and the idempotency
-   table is never pruned.
-8. **Snapshot load.** Every event makes every client fetch a full snapshot. Load grows as
-   clients × events.
-9. **Plain HTTP limits.** No service worker (offline shell), Wake Lock or notifications, and iOS
-   suspends pages when the screen locks (V). See §4 for the HTTPS decision.
-
-## 2. Failure modes and responses
+## 1. Failure modes and responses
 
 | # | Failure | Detected by | Effect | Response | Left over |
 |---|---|---|---|---|---|
-| 1 | Server process crash | launchd; clients see the socket close | 2–15 s outage | [have] KeepAlive. [add] LaunchDaemon, ThrottleInterval 2, SIGTERM drain, crash counter | Crash loop on a bad DB → #5 |
-| 2 | Mac sleeps | All clients stale | Full outage | [add] Mac mini; `pmset sleep 0`; server holds a sleep assertion; pre-show check reads `pmset -g assertions`; laptops: AC and lid open | Someone closes the lid |
-| 3 | macOS update / restart | Uptime reset on the health page | Outage of minutes or more | [add] Updates off for the run; LaunchDaemon starts without login | Some security responses can't be deferred |
-| 4 | Power loss | UPS alarm; unclean start in log | Outage; with NORMAL sync the last commits roll back | [add] UPS on Mac, switch and AP; `synchronous=FULL` + `fullfsync`; Mac mini restarts after power failure | UPS runs out |
-| 5 | DB corruption | [add] `quick_check` at start and hourly | Won't serve | [add] Auto-restore the newest verified backup into a new file and keep the bad one; one-command restore | ≤ 2 min of edits lost in show mode (event log helps) |
-| 6 | Disk full | [add] Free-space check every 60 s | Writes fail visibly (no silent loss) | [add] Alerts at 2 GB / 500 MB; log rotation; backup size cap | |
-| 7 | Phone Wi-Fi drop / roam | [add] Heartbeat > 25 s → STALE | That phone is stale | [have] Reconnect + replay + idempotent retries. [add] Heartbeat staleness, pending queue (interface spec §11) | Bad RF floor |
-| 8 | AP failure | All Wi-Fi clients stale | Phones dark; wired wall/FOH fine | [add] Wall and FOH wired; spare AP with the same SSID | AP swap time |
-| 9 | Phone locks / backgrounds | Socket suspended | Stale until resumed | [add] On resume: drop socket, reconnect, re-fetch; reload if no hello within 5 s | Acting before the banner shows |
-| 10 | Kiosk browser crash | Process exits | Wall blank | [add] LaunchAgent-kept Chrome kiosk; page watchdog reload; presence list shows the wall missing | GPU hang |
-| 11 | iPad auto-lock / Guided Access | Presence lost | Wall dark | [add] Auto-Lock Never + Guided Access Display Auto-Lock Never | iPadOS update resets settings |
-| 12 | Bridge crash / Playback Mac sleeps | [have] Heartbeat, 10 s alert | No MIDI follow | [have] Manual ◀ ▶. [add] Same sleep profile on the Playback Mac; log in ~/Library/Logs | Cue lost in that window |
-| 13 | Playback Mac replaced | Bridge never online | No follow | [add] One install script + key; pre-show test cue; accept Local Network Privacy | |
-| 14 | Network switch failure | Everything offline | Outage (Dante too) | [add] Spare labelled switch | Not RF Ops-specific |
-| 15 | Clock skew | [add] Offset from hello/tick | Wrong ages | [add] All client time maths uses server time | — |
-| 16 | Wrong show selected | Top bar | Edits to the wrong show | [add] Server-level **active show**; every screen follows it; switching asks for confirmation | |
-| 17 | Accidental tap | Event log | Wrong ack / advance | [add] Undo; hold-to-advance on phones; big targets | |
-| 18 | Conflicting edits | Event log | Silent overwrite | [add] Version check on mutations → "Sam just changed this" | |
-| 19 | Load from many clients | Health page p99 | Slow updates | [add] Per-show deltas / coalesced refresh ≥ 250 ms; per-client rate limit; 30-client load test | |
-| 20 | Half-open sockets | [add] Two-way heartbeat | "Live" on stale data | [add] Server tick every 10 s; client marks STALE at 25 s; server reaps at 30 s | — |
-| 21 | Server Mac dies outright | Everything offline | Outage | [add] **Warm standby** (§3) plus paper fallback (interface spec §11.3) | Edits since the last backup copy |
+| 1 | Server process crash | Render restarts it; clients see the socket close | 10–60 s outage | [have] SIGTERM handling, WAL checkpoint on exit, startup quick_check. [add] Crash counter on /health | Crash loop on a bad DB → #5 |
+| 2 | Render deploy or instance replacement | Socket close, new epoch unchanged | ~30–90 s outage (persistent disk disables zero-downtime deploys, V) | [add] **Deploy freeze:** auto-deploy off; deploys never during a show day. Runbook date check | Render platform maintenance |
+| 3 | Venue internet loss | Every venue-network screen goes OFFLINE; phones on cellular still work | Wall/FOH dark | [add] §3.4 "Venue screens offline" mode, then paper fallback (interface spec §11.3). Survey cellular per venue | Phones with no cellular signal |
+| 4 | Render region / platform outage | External uptime check; every client offline | Full outage | Paper fallback. Standby only covers a broken instance, not a region | — |
+| 5 | DB corruption | [have] quick_check at start and hourly | Won't serve | [have] The bad file is moved aside and the newest verified local backup restored. [add] If none is local, restore the newest from R2 | ≤ 2 min of edits; client replay (§3.3) recovers acked commands |
+| 6 | Disk full (5 GB disk) | [add] Free-space check every 60 s | Writes fail visibly, never silently | [add] Retention §2.2; WARNING at 25 % free, CRITICAL at 10 % (local backups pause, R2 uploads continue) | |
+| 7 | Phone Wi-Fi drop or roam | [add] No message for 25 s → STALE | That phone is stale | [have] Reconnect, replay, idempotent retries. [add] STALE/OFFLINE states, IndexedDB queue (interface spec §11) | Bad RF floor |
+| 8 | Venue AP failure | Wi-Fi clients stale | Phones fall back to cellular if allowed | [add] Wall/FOH wired; spare AP | |
+| 9 | Phone locks or backgrounds | Socket suspended | Stale until resumed | [add] On resume: drop the socket, reconnect, re-fetch. Reload if no hello within 5 s | Acting before the banner shows |
+| 10 | Kiosk browser crash | Presence | Wall blank | [add] Page watchdog reload; presence lists the wall as missing | GPU hang |
+| 11 | iPad auto-lock / Guided Access | Presence lost | Wall dark | Auto-Lock Never and Guided Access (§5) | iPadOS update resets settings |
+| 12 | Agent crash, or the Playback Mac sleeps | [have] Bridge heartbeat, 10 s alert | No MIDI follow | [have] Manual ◀ ▶. [add] Last-cue buffer (§3.5); sleep profile on the Playback Mac | |
+| 13 | Clock skew | [add] Offset from hello and tick | Wrong ages | [add] All client time maths uses server time | — |
+| 14 | Wrong show selected | Top bar | Edits to the wrong show | [add] Server-level **active show**; switching asks for confirmation | |
+| 15 | Accidental tap | Event log | Wrong ack or advance | [add] Undo; hold-to-advance on phones; big targets | |
+| 16 | Conflicting edits | Version check | Silent overwrite | [add] 409 "Sam just changed this" | |
+| 17 | Many clients | /health p99 | Slow updates | [add] Coalesced refresh ≥ 250 ms; per-client rate limit; load test | |
+| 18 | Half-open sockets | Two-way heartbeat | "Live" on stale data | [have] Server tick every 10 s; reap after 30 s. [add] Client STALE at 25 s | — |
+| 19 | Instance broken beyond restart (bad disk, bad deploy) | Uptime check; Lead | Outage | [add] **Standby takeover** (§3), < 10 min | Edits after the last R2 copy, less what client replay recovers |
+| 20 | Account or credential compromise | Audit log, rate-limit alert | Bad data | `docs/hosting-and-security.md` §Security | |
 
-## 3. Warm standby (second Mac)
+## 2. Database and backups
 
-This is the simplest pattern a crew can run (I). Treat it as a design to test, not a proven one.
+### 2.1 Database [have]
 
-**Normal running.** A second Mac has RF Ops installed but **stopped**. The primary copies each
-verified backup to it within 60 s. In show mode, backups run every 2 min.
+- `journal_mode=WAL`, `synchronous=FULL`, `fullfsync=ON`, `busy_timeout=5000` on every connection.
+- `quick_check` at startup and hourly. A corrupt file is moved aside as `*.corrupt-<stamp>.db`.
+  Then:
+  - the newest verified backup is restored;
+  - or, if none exists, the server refuses to start with "no verified backup".
 
-**Takeover.** `rfops-takeover` (one command, printed on the run sheet):
-1. Confirm the primary doesn't answer `/api/health` three times over 6 s. If it answers, refuse.
-2. Restore the newest verified backup and run `quick_check`.
-3. Write a new **epoch** to the DB.
-4. Take over the primary's IP (alias or DHCP reservation swap).
-5. Start the server.
+### 2.2 Backups and retention (5 GB persistent disk)
 
-**After takeover.**
-- Clients reconnect to the same address. A new epoch makes them do a full resync.
-- **No split brain:** a primary that comes back and sees a higher epoch, or an IP conflict,
-  starts **read-only**. The crew decides when to fail back.
-- Target: < 2 min to takeover, drilled by a non-developer.
+**Cadence.** Every 2 min in show mode, 15 min otherwise, skipped when nothing has changed.
+Always taken at show start, and by hand.
 
-## 4. HTTPS decision (owner)
+**Atomic write.** `VACUUM INTO` a temp file → `quick_check` → fsync → rename. Temp files are
+never listed. [have]
 
-Plain `http://<ip>` works everywhere but can't use the following (V: MDN secure contexts):
-- service workers, so there's no offline page after a reload;
-- Wake Lock, so phones sleep;
-- notifications;
-- on iOS, Home-Screen apps can't notify.
+**Retention:**
 
-`navigator.vibrate` doesn't exist on iOS at all.
+| Copy | Automatic backups | Pinned backups (show start, manual, pre-restore, pre-migration) |
+|---|---|---|
+| Local | Newest **20** | 30 days |
+| R2 (bucket lifecycle rules) | 14 days | 90 days |
 
-**Option A, HTTP.**
-- Phones are a **pull tool**: they show state when looked at.
-- Alarms rely on the wall and FOH screens and on comms.
+**Off-site.** Each verified backup is uploaded to R2 straight after writing. The last upload
+time and error are shown on /health. Two failed uploads in a row → WARNING; 10 min without a
+successful upload in show mode → CRITICAL.
 
-**Option B, local HTTPS.**
-- Create a local certificate authority once and install it on each device (about 2 minutes per
-  phone).
-- This enables:
-  - an offline shell;
-  - Wake Lock;
-  - installed-app notifications (iOS 16.4+);
-  - automatic reconnect on resume.
-- Costs: certificate setup for every new device, and expiry to manage (10-year local CA).
+**Free space.** Checked every 60 s on the disk holding the DB.
+- **< 25 % free:** WARNING.
+- **< 10 % free:** CRITICAL. Local backups pause, but R2 uploads of a fresh backup continue
+  (written, uploaded, then deleted locally).
+- Logs go to stdout (Render keeps them); nothing grows on disk except the DB and backups.
 
-## 5. Requirements (testable)
+**Restore.** Admin → Data → Restore (Lead + PIN). It takes a pinned "pre-restore" backup first.
+Sources: a local backup, R2, or an uploaded file. Then a new **epoch** is written, so every
+client resyncs (§3.3).
 
-### Database
+## 3. Connections, epoch, standby
 
-1. **Durability.** `synchronous=FULL` + `PRAGMA fullfsync=ON` on every connection.
-   *Test:* pull power 1 s after a swap returns, 20 times; the swap survives every time.
-2. **Busy timeout.** `busy_timeout` ≥ 5000 ms on every connection.
-   *Test:* a backup during writes causes no SQLITE_BUSY.
-3. **Startup check.** `quick_check` at startup and hourly. On failure: move the bad DB aside and
-   restore the newest verified backup, or refuse to start with a clear message.
-   *Test:* a corrupted file.
-4. **Atomic backups.** Write `*.tmp`, run `quick_check`, fsync, then rename. Failed backups never
-   appear in the list.
-   *Test:* kill during VACUUM INTO.
-5. **Retention.** Show-start and manual backups are pinned. Automatic backups are capped at 7 days
-   or a size limit.
-   *Test:* 50 automatic backups don't remove the pinned one.
-6. **Off-machine copy.** Copy each verified backup to the standby (or a USB drive) within 60 s.
-7. **Checkpointing.** `wal_checkpoint(TRUNCATE)` after each backup; WAL size on the health page.
-   *Test:* WAL < 10 MB after a 12 h soak.
-8. **Disk space.** Checked every 60 s. Alerts at 2 GB and 500 MB; below 500 MB, backups pause and
-   every screen alerts.
+### 3.1 Heartbeat and staleness
+
+- The server sends `{type:"tick", seq, server_time, epoch}` every 10 s. [have]
+- The client sends a ping every 10 s; the server reaps a socket silent for 30 s. [have, server]
+
+**Client states:**
+
+| State | When | What the client does |
+|---|---|---|
+| **LIVE** | Messages arriving | Normal |
+| **STALE** | Nothing for 25 s | Header turns red; risky writes are blocked, low-risk taps queue |
+| **OFFLINE** | Nothing for 60 s | Offline banner |
+| **Paper** | 120 s offline | "Use the paper plot" instruction |
+
+The client tells apart **device offline** (`navigator.onLine` false, or a health fetch fails at
+the network level) from **server unreachable** (network up, server not answering). Each has its
+own wording.
+
+### 3.2 Resume and server time
+
+- On visibilitychange, pageshow, online, or timer drift > 5 s: drop the socket, reconnect,
+  re-fetch. No hello within 5 s → reload.
+- All client time maths (ages, banners, "checked 13:02") uses `server_time` offset.
+
+### 3.3 Epoch and client replay
+
+The **epoch** (settings `server.epoch`) increments on restore and on standby takeover.
+
+**When a client sees a new epoch** in hello:
+1. It discards its snapshot.
+2. It re-sends every command that was **acknowledged in the last 15 min** (kept in IndexedDB with
+   its idempotency key and the version it expected).
+3. The server applies each one if its idempotency key is unknown. A key it already knows is a
+   no-op.
+4. A stale version gets a 409, and the client lists the conflicts once: "Couldn't re-apply: Red
+   battery OK (Sam changed it)".
+
+This recovers the changes between the last backup and the failure, as long as some client saw
+them acknowledged.
+
+**Never replayed:**
+- show-mode switches;
+- song advances (the current song is re-established by MIDI or the Lead);
+- admin edits.
+
+### 3.4 Venue screens offline (venue internet down, phones on cellular)
+
+The server knows which screens are expected (wall and FOH, enrolled screen credentials) from
+presence.
+
+**If every venue-network screen is gone for > 60 s while phones are still connected:**
+- Phones show a top banner: **"Venue screens offline — FOH can't see swaps."**
+- One combined **NOTE** replaces the per-screen presence warnings.
+- Swaps go straight to **"FOH confirm pending."** The swap card stays at the A2 with
+  "Tell FOH on comms: <copy-paste line>". When FOH is back, it gets the pending cards and
+  confirms them.
+- MIDI follow stops (the agent is on the venue network). The Lead advances by hand with
+  hold-to-advance.
+
+**When the venue screens are back,** the banner clears and FOH sees the pending swap cards.
+
+### 3.5 Agent last-cue buffer
+
+- The agent keeps the last cue it received, with the local receive time, while the server is
+  unreachable.
+- On reconnect it posts that cue with `cued_ms_ago`.
+- **Under 10 s old:** applied normally.
+- **10 s or older:** the server raises a **Song check** prompt to the Lead: "Playback moved to
+  *Song 6* while offline. Go there?" [Go] [Stay].
+- Older buffered cues are dropped; only the last one counts.
+
+### 3.6 Standby takeover (D7, cloud)
+
+**Setup:**
+- Two Render services from one Blueprint: `rfops` (active) and `rfops-standby` (suspended), each
+  with its own disk.
+- Cloudflare DNS: `rfops.<domain>` is a **proxied CNAME** to the active service's
+  `*.onrender.com` host. A proxied record changes within seconds (I, Cloudflare docs).
+- Both services share:
+  - `RFOPS_SESSION_KEY`, so signed session cookies stay valid across takeover;
+  - the R2 credentials and bucket.
+
+**Fencing lease in R2** (`lease.json`: `{epoch, holder, renewed_at}`):
+- The active service renews it every 15 s with a **conditional PUT** (`If-Match: <etag>`).
+- When a service starts, it reads the lease:
+  - holder is another service and `renewed_at` < 60 s ago → it starts **fenced** (read-only,
+    "This is the standby").
+  - Otherwise it takes the lease.
+- When a renewal finds the etag changed and a **higher epoch**, the service **fences itself**:
+  writes refused (503 "standby took over"), sockets closed, and clients reload onto the DNS
+  name.
+- If R2 is unreachable, the service keeps serving. The lease is only a guard against two
+  writers, and Cloudflare sends traffic to one origin.
+
+**Runbook** (a Lead, not a developer; target < 10 min, drilled once before the event):
+1. Render → `rfops-standby` → **Resume**.
+2. Open `https://rfops-standby.onrender.com/#/takeover`. Sign in as Lead with PIN, then tap
+   **Take over**. The standby:
+   - downloads the newest verified R2 backup;
+   - runs `quick_check`;
+   - writes the lease with epoch + 1;
+   - unfences itself.
+3. Cloudflare → DNS → `rfops` CNAME → change the target to the standby host. Proxied, so seconds.
+4. Clients reconnect, see the new epoch, and replay their acked commands (§3.3).
+5. **Fail back** only after the show: the same steps in reverse.
+
+## 4. Requirements (testable)
+
+### Database and backups
+
+1. **Durability** [have]. `synchronous=FULL` and `fullfsync` on every connection.
+   *Test:* pragma test; kill -9 one second after a swap returns, 20 times, and the swap survives
+   every time.
+2. **Busy timeout** [have]. ≥ 5000 ms. *Test:* a backup during writes causes no SQLITE_BUSY.
+3. **Startup check** [have] plus R2 fallback [add]. *Test:* a corrupted file, with and without
+   a local backup.
+4. **Atomic backups** [have]. *Test:* an interrupted temp file is never listed.
+5. **Retention** [add]. Local: 20 automatic, pinned kept 30 days.
+   *Test:* 30 automatic backups leave 20, and the pinned one survives.
+6. **Off-site** [add]. Each verified backup is uploaded to R2 within 60 s; failures show on
+   /health and alert per §2.2. *Test:* against an S3-compatible mock.
+7. **Checkpointing** [have]. WAL < 10 MB after a 12 h soak.
+8. **Disk space** [add]. Thresholds at 25 % and 10 %. *Test:* injected free-space values.
 
 ### Server process
 
-9. **LaunchDaemon:** `/Library/LaunchDaemons`, `UserName=rfops`, `RunAtLoad`, `KeepAlive`,
-   `ProcessType=Interactive`, `ThrottleInterval=2`.
-   *Test:* reboot with nobody logged in; clients are live within 90 s.
-10. **Graceful stop.** On SIGTERM: stop accepting, finish in-flight requests within 2 s, close the
-    pool.
-    *Test:* `launchctl kickstart -k` gives zero failed retried commands.
+9. **Render health check** [add]. `/api/health` returns 200 whenever the process can answer,
+   even if the DB is degraded, so Render never restart-loops a server that is serving. Detail is
+   on /api/health/detail.
+10. **Graceful stop** [have]. On SIGTERM: in-flight requests finish, then the WAL is checkpointed
+    and the pool closed. *Test:* SIGTERM during writes gives zero failed retried commands.
 11. **Recovery time.** Restart to all clients resynced in < 20 s with 10 clients.
+12. **Deploy freeze** [add]. Auto-deploy is off in render.yaml. /health shows the build
+    version, and the pre-show checklist confirms it matches the rehearsed version.
 
 ### Connections and clients
 
-12. **Heartbeat.** The server sends `{type:"tick", seq, server_time, epoch}` every 10 s. A client
-    with nothing for 25 s shows **STALE** and blocks risky writes (low-risk taps queue, interface
-    spec §11).
-13. **Reaping.** The server closes any socket silent for 30 s.
-14. **Resume.** On visibilitychange, pageshow, online, or timer drift > 5 s: drop the socket,
-    reconnect, re-fetch. No hello within 5 s → reload.
-    *Test:* iPhone locked for 10 min is current within 10 s of unlocking.
-15. **Staleness shown.** Seconds since the last server message are always visible; the header is
-    red from 25 s.
-16. **Server time.** All client time maths uses the server offset.
-    *Test:* device clock 10 min fast; banners still expire correctly.
-17. **Plain HTTP.** No secure-context-only features (unless Option B). Feature-detect optional
-    APIs.
-    *Test:* e2e against `http://<LAN IP>` in Safari and Chrome.
-18. **Kiosk self-healing.** The kiosk page reloads if its main loop stalls for 60 s.
-    *Test:* `kill` Chrome; the wall is back within 15 s.
-19. **Presence.** The server keeps a list of connected screens (operator, role, last heartbeat),
-    visible on FOH and Admin. In show mode, an expected screen missing for > 30 s raises a
-    WARNING.
-20. **Conflicting edits.** Mutations carry an expected version; stale writes get 409 with who
-    changed it.
-21. **Undo.** Undo is refused when a later event touched the same entity. A swap undo creates a
-    FOH "swap undone" card.
+13. **Heartbeat** [have, server]. Client STALE at 25 s, OFFLINE at 60 s, paper at 120 s [add].
+    *Test:* drop ticks; the states appear at the right times.
+14. **Reaping** [have]. 30 s.
+15. **Resume** [add]. *Test:* a page hidden for 10 min is current within 10 s of showing
+    (Playwright visibility emulation), plus a manual iPhone check.
+16. **Server time** [add]. *Test:* client clock 10 min fast; banners still expire correctly.
+17. **Replay never alarms** [add]. On load, no toast, vibration or pulse for events with seq ≤
+    the hello seq, except still-NEW criticals owned by this operator (once).
+18. **Epoch replay** [add]. *Test:*
+    - restore a backup missing the last 3 commands;
+    - the client replays them, 2 apply and 1 gives a 409;
+    - the conflict is listed once.
+19. **Kiosk self-healing** [add]. The kiosk page reloads if its main loop stalls for 60 s.
+20. **Presence** [have, server]. In show mode, an expected screen missing for > 30 s raises a
+    **NOTE** [add]. Every venue screen missing combines into the §3.4 banner.
+21. **Conflicting edits** [add]. Expected version on mutations; 409 with who changed it.
+22. **Undo** [add]. Refused when a later event touched the same entity. A swap undo creates a FOH
+    "swap undone" card.
+23. **Agent cue buffer** [add]. *Test:* a cue posted with `cued_ms_ago` 3000 applies; one with
+    30000 raises the Song check.
 
-### Load, soak, logs, standby
+### Load, soak, standby
 
-22. **Load.** 30 clients and 5 events/s for 10 min: p99 command < 300 ms, < 50% of one core.
-23. **Soak.** 12 h with scripted events, 10 headless clients and a real iPad:
-    - server RSS growth < 10%;
-    - flat task count;
-    - kiosk JS heap growth < 20%.
-24. **Logs.** Rotate at 10 MB × 5 under `data/logs`. Prune idempotency rows older than 24 h.
-25. **Standby.** Drilled takeover < 2 min.
-26. **Health page.** `/health` shows:
-    - uptime, epoch, DB quick_check result, WAL size, free disk;
-    - last backup age and standby copy age;
-    - connected screens, bridge state, sleep assertion, and pending OS updates where readable.
+24. **Load.** 30 clients and 5 events/s for 10 min: p95 command < 300 ms and p99 < 1 s on the
+    Render instance type chosen.
+25. **Soak.** 12 h with scripted events and 10 headless clients:
+    - server RSS growth < 10 %;
+    - kiosk JS heap growth < 20 %.
+26. **Standby.**
+    - Fencing tests against an S3 mock: a service starting with a fresh lease held by another
+      starts fenced; a renewal seeing a higher epoch fences and refuses writes.
+    - A drilled takeover in < 10 min (manual, once before the event).
+27. **Health detail (Lead only)** shows:
+    - uptime, epoch, version, DB quick_check, WAL size, free disk %;
+    - last backup and last R2 upload ages;
+    - lease holder;
+    - connected screens and agent state.
 
-## 6. Show-day golden setup
+## 5. Show-day golden setup
 
-### Server Mac
+### Cloud
 
-A Mac mini is preferred.
+- Confirm the Render instance is paid tier (the free tier spins down and drops sockets, V).
+- **Day before:** check the version matches the rehearsal, auto-deploy is off, and the last R2
+  upload is < 5 min old.
+- An external uptime check (Cloudflare health check or UptimeRobot) on `/api/health` pages the
+  Lead.
 
-- **Network and power:** wired Ethernet, static IP, Wi-Fi off, on a UPS.
-- **Commands:**
-  - `sudo pmset -a sleep 0 displaysleep 10 disksleep 0 powernap 0 womp 1 autorestart 1 standby 0`
-  - `sudo systemsetup -setrestartfreeze on`
-- **macOS settings:**
-  - Energy: "Prevent automatic sleeping" and "Start up automatically after a power failure".
-  - Software Update: every automatic toggle off, including Security Responses.
-  - Screen saver and password: Never.
-  - Do Not Disturb on, AirDrop off, Screen Sharing on.
-  - Time Machine and Spotlight excluded for `data/`.
-- **Firewall:** off on the isolated show LAN, or sign the binary with a stable identity and allow
-  it once. **No rebuilds on show day.**
-- **Run as:** LaunchDaemon (`deploy/macos/com.rfops.server.daemon.plist`, to be added).
-- **Pre-show health check:** run one command (`rfops-check`) or open the `/health` page.
+### Playback MacBook (agent)
 
-### Playback Mac
-
-- Same sleep and update profile as the server. Wired.
-- The bridge stays a LaunchAgent (CoreMIDI needs the user session). That means:
-  - auto-login on (FileVault off on this machine), or accept a manual login after a reboot;
-  - accept the Local Network permission once;
-  - log at `~/Library/Logs/rfops-bridge.log`.
+- Wired. On AC, lid open.
+- `sudo pmset -a sleep 0 disksleep 0 powernap 0 standby 0` for the run.
+- Software updates off for the run.
+- The agent is a LaunchAgent: CoreMIDI needs the user session. Accept the Local Network
+  permission once.
 - Pre-show: send the test cue.
 
 ### Wall screen
 
 **Chrome on a mini PC or Mac:**
 - Wired.
-- A LaunchAgent with KeepAlive runs Chrome with:
-  - `--kiosk --app=http://<server>/#/board?kiosk=1`
+- `--kiosk --app=https://rfops.<domain>/#/board?kiosk=1`, plus:
   - `--noerrdialogs --disable-session-crashed-bubble`
   - `--disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding`
   - a dedicated `--user-data-dir`.
-- Memory Saver off; auto-update off for the run.
+- Memory Saver off.
+- Enrolled with a **screen credential** (interface spec §1.3).
 
 **iPad as the wall:**
-- Auto-Lock Never, on a charger, Low Power off, auto-updates off.
+- Auto-Lock Never, on a charger, Low Power off.
 - Home-Screen web app.
-- Guided Access with Display Auto-Lock Never, no time limit, and a passcode.
-- Private Wi-Fi Address off for the show SSID.
+- Guided Access with Display Auto-Lock Never.
 
 ### FOH screen
 
-Laptop on wired Ethernet, Chrome `--app` window, Memory Saver off, no system sleep.
+Laptop, wired, Chrome `--app` window, Memory Saver off, screen credential.
 
 ### Phones
 
-- The RF Ops SSID only, with auto-join for others off.
-- Auto-Lock ≥ 5 min or Never during the show.
-- Home-Screen icon.
+- Home-Screen app, signed in by join code or PIN.
+- Auto-Lock ≥ 5 min.
 - Crew rule: **red STALE = don't trust it; wait or tap Reload.**
+- **Per venue:** survey whether cellular works backstage (§3.4) and note it on the run sheet.
 
 ### Network
 
-- **RF Ops Wi-Fi:** its own SSID/VLAN, or a dedicated AP port that excludes Dante. Confirm in
-  Dante Controller that no media flows reach the AP.
-- **Channels:** 5 GHz channels 36–64 only (GLX-D+ uses 5725–5850 MHz).
-- **Spares:** a spare AP and a spare switch, pre-configured.
-- **On site:** measure phone reconnect times and note them on the run sheet.
+- 5 GHz Wi-Fi on channels 36–64 only (GLXD6+ uses 5725–5850 MHz).
+- Keep phone Wi-Fi off the Dante network.
+- Spare AP.
 
 ## Sources
 
-- **SQLite:** pragma.html, wal.html, lang_vacuum.html, howtocorrupt.html, rescode.html
-  (sqlite.org); Litestream tips.
-- **launchd:** launchd.plist(5).
-- **Apple:**
-  - Support: preventing sleep, software update settings, FileVault and automatic login.
-  - TN3179 (Local Network Privacy).
-  - DTS forum threads 747298 / 776479 / 763753.
-- **Show-machine prep:** Voxel "Make QLab Unstoppable"; Gareth Fry QLab setup;
-  installation_up_4evr.
+- **SQLite:** pragma.html, wal.html, lang_vacuum.html, howtocorrupt.html.
+- **Render docs:**
+  - persistent disks (no zero-downtime deploy);
+  - free-tier spin-down;
+  - WebSocket behaviour on deploy;
+  - `maxShutdownDelaySeconds`;
+  - health checks.
+- **Cloudflare docs:** proxied DNS records; R2 conditional requests (`If-Match`) and lifecycle
+  rules.
 - **WebKit bugs** 228296 and 308073 (iOS WebSocket suspension and resume).
-- **Browser:** MDN Secure Contexts; Chrome background-tab throttling and Memory Saver;
-  chrome-launcher flags.
-- **Dante:** Audinate on Wi-Fi and multicast; Yamaha Dante network design guide; Shure on Dante
-  and IGMP snooping.
-- **WebSocket heartbeats:** websocket.org; python-websockets keepalive docs.
-- **Other:** Android DnsResolver (mDNS); chrony FAQ; GreptimeDB / Svix on Rust memory
-  growth; tokio-metrics.
+- **MDN:** Page Visibility, Secure Contexts, Push API.
+- **Dante and Wi-Fi:** Audinate on Wi-Fi and multicast; Shure on IGMP snooping.
