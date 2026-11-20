@@ -1,0 +1,61 @@
+# Render Blueprint for RF Ops (docs/hosting-and-security.md, docs/reliability.md §3.6).
+# After creating it: suspend `rfops-standby`, then fill in the secret values marked sync: false.
+# Auto-deploy is off: deploys never happen on a show day by accident.
+
+envVarGroups:
+  - name: rfops-shared
+    envVars:
+      # Shared by active and standby so session cookies survive a takeover.
+      - key: RFOPS_SESSION_KEY
+        generateValue: true
+      - key: RFOPS_PUBLIC_ORIGIN
+        sync: false # https://rfops.<your domain>
+      - key: RFOPS_TZ
+        value: America/Chicago
+      - key: RFOPS_ADMIN_NAME
+        sync: false
+      - key: RFOPS_ADMIN_PIN
+        sync: false
+      - key: RFOPS_R2_ENDPOINT
+        sync: false # https://<account id>.r2.cloudflarestorage.com
+      - key: RFOPS_R2_BUCKET
+        sync: false
+      - key: RFOPS_R2_ACCESS_KEY_ID
+        sync: false
+      - key: RFOPS_R2_SECRET_ACCESS_KEY
+        sync: false
+
+services:
+  - type: web
+    name: rfops
+    runtime: docker
+    plan: starter # never free: the free tier sleeps and drops WebSockets
+    dockerfilePath: ./Dockerfile
+    autoDeploy: false
+    healthCheckPath: /api/health
+    maxShutdownDelaySeconds: 30
+    disk:
+      name: rfops-data
+      mountPath: /data
+      sizeGB: 5
+    envVars:
+      - key: RFOPS_INSTANCE
+        value: active
+      - fromGroup: rfops-shared
+
+  - type: web
+    name: rfops-standby
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    autoDeploy: false
+    healthCheckPath: /api/health
+    maxShutdownDelaySeconds: 30
+    disk:
+      name: rfops-standby-data
+      mountPath: /data
+      sizeGB: 5
+    envVars:
+      - key: RFOPS_INSTANCE
+        value: standby
+      - fromGroup: rfops-shared

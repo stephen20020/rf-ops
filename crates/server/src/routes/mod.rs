@@ -6,6 +6,7 @@ pub(crate) mod midi;
 pub(crate) mod ops;
 mod showops;
 pub(crate) mod shows;
+mod standby;
 
 use axum::{extract::State, routing::get, Json, Router};
 use serde_json::{json, Value};
@@ -25,6 +26,7 @@ pub fn router() -> Router<AppState> {
         .merge(showops::router())
         .merge(data::router())
         .merge(midi::router())
+        .merge(standby::router())
 }
 
 /// Public liveness probe for Render and uptime monitors: status only, no show data.

@@ -212,6 +212,9 @@ pub fn is_public(path: &str) -> bool {
             | "/api/auth/status"
             | "/api/auth/login"
             | "/api/auth/join"
+            // Take over checks the Lead's PIN against the downloaded backup itself.
+            | "/api/standby/takeover"
+            | "/api/standby/status"
             // The on-site agent authenticates with its own key.
             | "/api/midi"
             | "/api/midi/heartbeat"
@@ -372,12 +375,45 @@ fn origin_ok(cfg: &AuthConfig, method: &Method, headers: &HeaderMap) -> bool {
     }
 }
 
+/// Same-host origin (`https://<Host>`), used for the takeover page, which is opened on the
+/// standby's own onrender.com address rather than the public one.
+fn same_host_origin(headers: &HeaderMap) -> bool {
+    let host = headers.get(header::HOST).and_then(|v| v.to_str().ok()).unwrap_or_default();
+    headers
+        .get(header::ORIGIN)
+        .and_then(|v| v.to_str().ok())
+        .is_none_or(|o| o == format!("https://{host}") || o == format!("http://{host}"))
+}
+
 /// Middleware: Origin check, then a session for every non-public `/api/` route.
 pub async fn require_session(State(s): State<AppState>, mut req: Request, next: Next) -> Response {
-    if !origin_ok(&s.auth, req.method(), req.headers()) {
+    let takeover = req.uri().path() == "/api/standby/takeover";
+    let origin_fine = if takeover {
+        same_host_origin(req.headers()) || origin_ok(&s.auth, req.method(), req.headers())
+    } else {
+        origin_ok(&s.auth, req.method(), req.headers())
+    };
+    if !origin_fine {
         return ApiError::Forbidden("request from another site refused".into()).into_response();
     }
     let path = req.uri().path();
+    // A fenced service (the standby, or an old active after a takeover) serves no data at all:
+    // its disk may be empty, from a drill, or stale. Only health, the standby endpoints and the
+    // app shell (for the takeover page) answer.
+    if s.is_fenced()
+        && path.starts_with("/api/")
+        && path != "/api/health"
+        && !path.starts_with("/api/standby/")
+    {
+        return (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({
+                "error": "This RF Ops server is not the active one (standby, or taken over). Open the main RF Ops address.",
+                "fenced": true,
+            })),
+        )
+            .into_response();
+    }
     if s.auth.header_auth || !path.starts_with("/api/") || is_public(path) {
         return next.run(req).await;
     }

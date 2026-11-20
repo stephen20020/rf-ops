@@ -197,6 +197,58 @@ pub type Offsite = Arc<
     dyn Fn(PathBuf) -> futures_util::future::BoxFuture<'static, Result<(), String>> + Send + Sync,
 >;
 
+/// R2 key for a backup file: `<auto|pinned>/g<generation, 6 digits>/<name>`. The class comes
+/// first so R2 lifecycle rules (`auto/` 14 days, `pinned/` 90 days) match. Restores take the
+/// newest file of the highest generation, so a stale server's uploads are never chosen.
+pub fn r2_key(generation: i64, name: &str) -> String {
+    let class = if name.ends_with("-pin.db") { "pinned" } else { "auto" };
+    format!("{class}/g{generation:06}/{name}")
+}
+
+/// Off-site uploader to R2. Refuses while fenced (a fenced server must not publish backups).
+pub fn r2_offsite(r2: crate::r2::R2, lease: Option<crate::lease::LeaseHandle>) -> Offsite {
+    Arc::new(move |path: PathBuf| {
+        let r2 = r2.clone();
+        let lease = lease.clone();
+        Box::pin(async move {
+            let generation = match &lease {
+                Some(l) if l.is_fenced() => return Err("fenced: not uploading".to_string()),
+                Some(l) => l.generation().max(1),
+                None => 1,
+            };
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .ok_or("no file name")?;
+            let body = tokio::fs::read(&path)
+                .await
+                .map_err(|e| format!("read {name}: {e}"))?;
+            r2.put(&r2_key(generation, &name), body, crate::r2::Cond::None)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string())
+        })
+    })
+}
+
+/// The newest backup in R2: highest generation first, then the newest name (names embed a
+/// sortable UTC timestamp). Returns the object key.
+pub fn pick_newest(keys: &[String]) -> Option<String> {
+    keys.iter()
+        .filter_map(|k| {
+            let mut parts = k.split('/');
+            let class = parts.next()?;
+            if class != "auto" && class != "pinned" {
+                return None;
+            }
+            let g: i64 = parts.next()?.strip_prefix('g')?.parse().ok()?;
+            let name = parts.next()?;
+            (name.starts_with("rfops-") && name.ends_with(".db")).then(|| (g, name.to_string(), k.clone()))
+        })
+        .max_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)))
+        .map(|(_, _, k)| k)
+}
+
 /// One backup plus its off-site copy, recording the outcome in `status`.
 pub async fn backup_and_ship(
     pool: &SqlitePool,
@@ -291,6 +343,21 @@ pub async fn periodic(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn r2_keys_and_newest() {
+        assert_eq!(r2_key(3, "rfops-20261120-100000.000-auto.db"), "auto/g000003/rfops-20261120-100000.000-auto.db");
+        assert_eq!(r2_key(3, "rfops-x-show-start-pin.db"), "pinned/g000003/rfops-x-show-start-pin.db");
+        let keys = vec![
+            "auto/g000002/rfops-20261120-110000.000-auto.db".to_string(),
+            "pinned/g000003/rfops-20261120-090000.000-show-start-pin.db".to_string(),
+            "auto/g000003/rfops-20261120-100000.000-auto.db".to_string(),
+            "auto/g000010/garbage.txt".to_string(),
+            "lease.json".to_string(),
+        ];
+        // Highest generation wins even over a newer timestamp from an older generation.
+        assert_eq!(pick_newest(&keys).unwrap(), "auto/g000003/rfops-20261120-100000.000-auto.db");
+    }
 
     #[test]
     fn disk_thresholds() {

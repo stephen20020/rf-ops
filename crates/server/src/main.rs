@@ -39,13 +39,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             })
     });
 
-    let (pool, startup_note) = match db::open_verified(&db_url, backup_dir.as_deref()).await {
+    // A standby Take over (or a restore) left a verified download to boot into.
+    let restored = match db::file_path(&db_url) {
+        Some(file) => restore_marker(&file)?,
+        None => None,
+    };
+
+    let (pool, mut startup_note) = match db::open_verified(&db_url, backup_dir.as_deref()).await {
         Ok(v) => v,
         Err(e) => {
             tracing::error!(problem = %e, "cannot open the database");
             return Err(e.into());
         }
     };
+    if let Some(from) = restored {
+        // New epoch: every client discards its snapshot and replays its acknowledged commands.
+        sqlx::query(
+            "INSERT INTO settings (key, value) VALUES ('server.epoch', '2')
+             ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1",
+        )
+        .execute(&pool)
+        .await?;
+        startup_note = Some(format!("Restored from {from} at startup (takeover/restore)."));
+    }
     if let Some(n) = &startup_note {
         tracing::warn!(note = %n, "database recovered at startup");
     }
@@ -82,6 +98,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut state = AppState::new(pool.clone())
         .await?
         .with_startup_note(startup_note);
+    state.exit_after_takeover = true;
+    // Production: R2 off-site backups and the single-writer lease (docs/reliability.md §3.6).
+    if let Some(r2) = rfops_server::r2::R2::from_env() {
+        let instance = std::env::var("RFOPS_INSTANCE").unwrap_or_else(|_| "active".into());
+        let was_holder = rfops_server::midi::setting(&pool, "lease.held_by")
+            .await?
+            .is_some_and(|h| h == instance);
+        let lease =
+            rfops_server::lease::LeaseHandle::start_with(r2.clone(), &instance, was_holder).await;
+        // Remember whether this server holds the lease, for a restart while R2 is unreachable.
+        {
+            let (pool, lease, instance) = (pool.clone(), lease.clone(), instance.clone());
+            tokio::spawn(async move {
+                let mut last = None;
+                loop {
+                    let held = !lease.is_fenced();
+                    if last != Some(held) {
+                        let v = held.then_some(instance.as_str());
+                        if rfops_server::midi::set_setting(&pool, "lease.held_by", v).await.is_ok() {
+                            last = Some(held);
+                        }
+                    }
+                    tokio::time::sleep(rfops_server::lease::RENEW_EVERY).await;
+                }
+            });
+        }
+        let st = lease.snapshot();
+        tracing::info!(%instance, fenced = st.fenced, reason = %st.reason, "R2 lease");
+        state = state
+            .with_offsite(backup::r2_offsite(r2, Some(lease.clone())))
+            .with_lease(lease);
+    } else {
+        tracing::warn!("R2 not configured (RFOPS_R2_*): no off-site backups and no standby lease");
+    }
     if let Some(dir) = backup_dir {
         tracing::info!(dir = %dir.display(), "verified backups: every 2 min in show mode, 15 min otherwise, and at show start");
         state = state.with_backups(dir, backup::SHOW_INTERVAL, backup::IDLE_INTERVAL);
@@ -108,6 +158,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     pool.close().await;
     tracing::info!("RF Ops server stopped cleanly");
     Ok(())
+}
+
+/// If `<db>.restore-on-boot` exists, move the database aside and put the staged download in its
+/// place. Returns the staged file's name. The download was already verified with quick_check.
+fn restore_marker(db: &std::path::Path) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    let marker = PathBuf::from(format!("{}.restore-on-boot", db.display()));
+    let Ok(staged) = std::fs::read_to_string(&marker) else {
+        return Ok(None);
+    };
+    let staged = PathBuf::from(staged.trim());
+    if !staged.exists() {
+        std::fs::remove_file(&marker)?;
+        tracing::error!(file = %staged.display(), "restore marker points at a missing file; ignored");
+        return Ok(None);
+    }
+    let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    for suffix in ["", "-wal", "-shm"] {
+        let from = PathBuf::from(format!("{}{suffix}", db.display()));
+        if from.exists() {
+            std::fs::rename(&from, format!("{}.pre-restore-{stamp}{suffix}", db.display()))?;
+        }
+    }
+    std::fs::rename(&staged, db)?;
+    std::fs::remove_file(&marker)?;
+    Ok(Some(
+        staged
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default(),
+    ))
 }
 
 /// Ctrl-C, or SIGTERM from launchd / Render / systemd. In-flight requests finish; open

@@ -7,12 +7,13 @@
   import Foh from './views/Foh.svelte';
   import Admin from './views/Admin.svelte';
   import Report from './views/Report.svelte';
+  import Takeover from './views/Takeover.svelte';
   import SwapBanner from './components/SwapBanner.svelte';
 
-  type Route = 'backstage' | 'foh' | 'admin' | 'login' | 'join' | 'report';
+  type Route = 'backstage' | 'foh' | 'admin' | 'login' | 'join' | 'report' | 'takeover';
   function parse(): Route {
     const h = location.hash.replace(/^#\/?/, '').split('?')[0];
-    return (['backstage', 'foh', 'admin', 'login', 'join', 'report'] as Route[]).includes(h as Route) ? (h as Route) : 'backstage';
+    return (['backstage', 'foh', 'admin', 'login', 'join', 'report', 'takeover'] as Route[]).includes(h as Route) ? (h as Route) : 'backstage';
   }
   let route = $state<Route>(parse());
   $effect(() => {
@@ -23,7 +24,14 @@
 
 </script>
 
-{#if !store.authChecked}
+{#if route === 'takeover'}
+  <Takeover />
+{:else if store.fenced}
+  <div class="loading" data-testid="fenced">
+    <p><b>This is not the active RF Ops server.</b></p>
+    <p class="muted">Open the main RF Ops address. Lead: to make this server active, go to <a href="#/takeover">Take over</a>.</p>
+  </div>
+{:else if !store.authChecked}
   <div class="loading muted">Connecting to RF Ops server…</div>
 {:else if !store.me || route === 'login' || route === 'join'}
   <Login />

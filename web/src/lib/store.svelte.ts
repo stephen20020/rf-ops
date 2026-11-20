@@ -30,6 +30,8 @@ class Store {
   authChecked = $state(false);
   /** Some Lead can sign in (else the server needs RFOPS_ADMIN_NAME / RFOPS_ADMIN_PIN). */
   adminExists = $state(true);
+  /** This server is fenced (standby, or taken over): it serves no data. */
+  fenced = $state(false);
   /** The session ended while in use (shown on the sign-in screen). */
   sessionEnded = $state(false);
   dismissedSwaps = $state<number[]>([]);
@@ -89,12 +91,13 @@ class Store {
     try {
       const st = await get<{ signed_in: Principal | null; admin_exists: boolean }>('/api/auth/status');
       this.adminExists = st.admin_exists;
-      if (st.signed_in) this.signedIn(st.signed_in);
-    } catch {
-      setTimeout(() => void this.checkAuth(), 2000);
-      return;
-    } finally {
+      this.fenced = false;
       this.authChecked = true;
+      if (st.signed_in) this.signedIn(st.signed_in);
+    } catch (e) {
+      // Server unreachable: keep showing "Connecting…" (never a sign-in screen) and retry.
+      this.fenced = e instanceof ApiError && e.status === 503;
+      setTimeout(() => void this.checkAuth(), this.fenced ? 15000 : 2000);
     }
   }
 

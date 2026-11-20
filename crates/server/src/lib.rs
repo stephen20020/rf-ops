@@ -3,6 +3,8 @@ pub mod backup;
 pub mod db;
 pub mod error;
 pub mod hub;
+pub mod lease;
+pub mod r2;
 pub mod midi;
 mod routes;
 pub mod rules;
@@ -48,6 +50,11 @@ pub struct AppState {
     /// Set when startup had to recover the database; shown on the health page.
     pub startup_note: Option<String>,
     pub auth: Arc<auth::AuthConfig>,
+    /// Single-writer lease in R2 (production). `None` = no R2 configured: never fenced.
+    pub lease: Option<lease::LeaseHandle>,
+    /// After a successful Take over the process exits so Render restarts it into the restored
+    /// database. Tests leave this off.
+    pub exit_after_takeover: bool,
 }
 
 impl AppState {
@@ -85,7 +92,20 @@ impl AppState {
             presence: hub::Presence::default(),
             startup_note: None,
             auth: Arc::new(auth::AuthConfig::new(key, origin)),
+            lease: None,
+            exit_after_takeover: false,
         })
+    }
+
+    /// Hold (or wait for) the R2 lease, renewing it in the background.
+    pub fn with_lease(mut self, h: lease::LeaseHandle) -> Self {
+        tokio::spawn(h.clone().run());
+        self.lease = Some(h);
+        self
+    }
+
+    pub fn is_fenced(&self) -> bool {
+        self.lease.as_ref().is_some_and(|l| l.is_fenced())
     }
 
     /// TESTS ONLY: take identity from the legacy `x-rfops-actor` header with no session, as

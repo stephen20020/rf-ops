@@ -277,6 +277,9 @@ enum Outgoing<'a> {
         seq: i64,
         server_time: String,
         epoch: i64,
+        /// Lease generation (0 without R2). Clients replay acked commands when (generation,
+        /// epoch) changes, because a restore + takeover can repeat an epoch number.
+        generation: i64,
     },
     Event {
         event: &'a Event,
@@ -290,6 +293,7 @@ enum Outgoing<'a> {
         seq: i64,
         server_time: String,
         epoch: i64,
+        generation: i64,
     },
 }
 
@@ -337,6 +341,7 @@ async fn client_loop(
             seq: head,
             server_time: now(),
             epoch: s.epoch,
+            generation: s.lease.as_ref().map(|l| l.generation()).unwrap_or(0),
         },
     )
     .await
@@ -396,6 +401,11 @@ async fn client_loop(
                     let _ = socket.send(Message::Close(None)).await;
                     return;
                 }
+                if s.is_fenced() {
+                    tracing::info!(client = client_id, "fenced; closing socket");
+                    let _ = socket.send(Message::Close(None)).await;
+                    return;
+                }
                 if let Some(h) = recheck {
                     if crate::auth::authenticate(s, h).await.is_err() {
                         tracing::info!(client = client_id, "session ended; closing socket");
@@ -403,7 +413,12 @@ async fn client_loop(
                         return;
                     }
                 }
-                let msg = Outgoing::Tick { seq: last, server_time: now(), epoch: s.epoch };
+                let msg = Outgoing::Tick {
+                    seq: last,
+                    server_time: now(),
+                    epoch: s.epoch,
+                    generation: s.lease.as_ref().map(|l| l.generation()).unwrap_or(0),
+                };
                 if !send(socket, &msg).await { return; }
                 if socket.send(Message::Ping(Vec::new().into())).await.is_err() { return; }
             }

@@ -176,29 +176,39 @@ presence.
 
 | Rule | Behaviour |
 |---|---|
-| Active at start | Takes the lease only if `holder` = itself, or `renewed_at` is older than 60 s. Otherwise it starts **fenced** |
-| Standby at start | **Always starts fenced.** Only **Take over** writes its lease |
+| Any service at start | If the lease already names it (including the standby after its own Take over), it resumes the lease |
+| Very first start | No lease object at all: `active` creates generation 1 |
+| Otherwise | **Starts fenced**, even if the lease has expired. Only **Take over** gives a service a lease it doesn't hold, and Take over always restores the newest backup first. So no service can come up writing on a stale disk |
+| R2 unreachable at start | Serves only if its database records that it held the lease last time (an ordinary restart during an R2 outage), with a WARNING. Otherwise fenced |
+| Take over | Writes generation + 1 (`If-Match` the read etag). It stays fenced until it has restarted into the restored database |
 | Renewal | Every 15 s, `If-Match` the etag it last wrote |
 | **Fence test** | A renewal gets 412 and the lease now names another holder → fence at once |
-| Fenced | Writes are refused with 503 "standby took over", R2 uploads stop, and sockets close with reason `fenced` |
+| Fenced | **Serves no data**: every `/api/` call except `/api/health` and `/api/standby/*` gets 503, and WebSockets are refused or closed. Screens show "This is not the active RF Ops server". Its disk may be empty, from a drill, or stale. R2 uploads stop |
 | R2 unreachable | Keep serving and keep retrying. After 60 s without a successful renewal, a WARNING on /health. The runbook's first step (suspend the old service) is the real guard |
-| Backup keys | `g<generation>/auto/…` and `g<generation>/pinned/…`. Restore picks the newest backup of the **highest generation**, so a fenced or stale instance's backups can never be chosen |
+| Backup keys | `auto/g000004/<file>` and `pinned/g000004/<file>`: the class first so lifecycle rules match, then the generation zero-padded. Restore picks the newest backup of the **highest generation** (compared as numbers), so a fenced or stale instance's backups can never be chosen |
 
 **Runbook** (a Lead, not a developer; target < 10 min, drilled once before the event):
 1. Render → `rfops` → **Suspend**, if Render shows it running. This guarantees the old
    instance is gone.
 2. Render → `rfops-standby` → **Resume**. It starts fenced.
-3. Open `https://rfops-standby.onrender.com/#/takeover`. Enter the Lead's name and PIN, then tap
-   **Take over**. The standby:
+3. Open `https://rfops-standby.onrender.com/#/takeover`. This page is allowed from the
+   service's own address. It shows the backup it will restore and its age, and warns if that is
+   older than 15 min (beyond the screens' replay window). Enter the Lead's name and PIN, then
+   tap **Take over**. The standby:
    - downloads the newest verified backup of the highest generation from R2;
    - runs `quick_check`;
    - **checks the name and PIN against that backup's users** (its own disk may be empty);
    - writes the lease (`If-Match` the etag it read; generation + 1);
-   - writes a new DB epoch;
-   - unfences.
+   - restarts into the restored database with a new epoch, and resumes its lease.
+
+   **Take over needs R2.** If R2 itself is down, there is nothing to restore from: use paper.
 4. Cloudflare → Workers → `rfops-proxy` → set `ORIGIN` to `rfops-standby.onrender.com`.
 5. Clients reconnect, see the new epoch, and replay their acked commands (§3.3).
-6. **Fail back** only after the show: the same steps in reverse.
+6. **Fail back** only after the show: resume `rfops` (it starts fenced), run **Take over** on
+   `rfops.onrender.com/#/takeover`, set `ORIGIN` back, then suspend the standby.
+
+Clients replay when **(generation, epoch)** changes, not the epoch alone: a restore followed by a
+takeover can repeat an epoch number.
 
 **Sign-in data across a takeover.**
 - Any revocation, PIN change or join-code change triggers an immediate backup and R2 upload
