@@ -4,6 +4,7 @@ pub(crate) mod inventory;
 mod live;
 pub(crate) mod midi;
 pub(crate) mod ops;
+mod plan;
 mod showops;
 pub(crate) mod shows;
 mod standby;
@@ -27,6 +28,7 @@ pub fn router() -> Router<AppState> {
         .merge(data::router())
         .merge(midi::router())
         .merge(standby::router())
+        .merge(plan::router())
 }
 
 /// Public liveness probe for Render and uptime monitors: status only, no show data.

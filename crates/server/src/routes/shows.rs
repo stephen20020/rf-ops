@@ -508,6 +508,7 @@ async fn set_current_song(
         .bind(id)
         .execute(&mut *tx)
         .await?;
+    crate::plan_store::record_visit(&mut tx, id, b.song_id, "manual").await?;
     show.current_song_id = b.song_id;
     log_event(
         &mut tx,

@@ -6,6 +6,7 @@ pub mod hub;
 pub mod lease;
 pub mod r2;
 pub mod midi;
+pub mod plan_store;
 mod routes;
 pub mod rules;
 pub mod seed;

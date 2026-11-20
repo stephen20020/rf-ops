@@ -234,6 +234,7 @@ async fn advance(
             .bind(id)
             .execute(&mut *tx)
             .await?;
+        crate::plan_store::record_visit(&mut tx, id, target, "manual").await?;
         log_event(
             &mut tx,
             &actor,

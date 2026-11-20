@@ -350,6 +350,7 @@ async fn apply(pool: &SqlitePool, msg: MidiMsg, source: &str) -> ApiResult<Strin
         .bind(show_id)
         .execute(&mut *tx)
         .await?;
+    crate::plan_store::record_visit(&mut tx, show_id, Some(target), "midi").await?;
     log_event(
         &mut tx,
         &system(source),
