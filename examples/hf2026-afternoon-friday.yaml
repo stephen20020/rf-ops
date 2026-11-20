@@ -22,6 +22,12 @@ people:
   - { name: Seth, notes: "Vocal. Sennheiser 1, Andrew Taylor's mix (ME TBC)" }
   - { name: Josh Patterson, notes: "Guest. Sennheiser 2, ME 15 (choir wedge)" }
 
+# Guitar wireless: packs paired with their receivers (who plays which guitar is TBC).
+devices:
+  - { label: GLXD1-1, kind: guitar, base: GLXD6-1 }
+  - { label: GLXD1-2, kind: guitar, base: GLXD6-2 }
+  - { label: GLXD1+-1, kind: guitar, base: GLXD6+-1 }
+
 # IEM transmitter → ME-1 mix for this show. RX1, RX3 and RX6 all listen to TX1.
 mixes:
   TX1: ME 1
@@ -53,4 +59,20 @@ plot:
     Gabe's Shure: David
     Sennheiser 1: Seth
     Sennheiser 2: Josh Patterson
-    # Wireless mics Ch 33–44 (Yellow … Bpack4): who sings on which colour is still TBC.
+    # Wireless mics, console Ch 33–44. Who sings on which colour is still TBC in the documents:
+    # replace "nobody" with a name from people (or set them in Admin → Plot).
+    Yellow: nobody     # Ch 33
+    Red: nobody        # Ch 34
+    Blue: nobody       # Ch 35
+    Green: nobody      # Ch 36
+    Black: nobody      # Ch 37
+    White: nobody      # Ch 38
+    Orange: nobody     # Ch 39
+    Tan: nobody        # Ch 40
+    Bpack1: nobody     # Ch 41
+    Bpack2: nobody     # Ch 42
+    Bpack3: nobody     # Ch 43
+    Bpack4: nobody     # Ch 44
+    GLXD1-1: nobody    # guitar (Z2)
+    GLXD1-2: nobody    # guitar (Z2)
+    GLXD1+-1: nobody   # guitar (Z3, 5.8 GHz band)

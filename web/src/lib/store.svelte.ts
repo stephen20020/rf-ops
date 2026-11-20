@@ -82,6 +82,12 @@ class Store {
   private refreshAgain = false;
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private toastSeq = 0;
+  private refreshListeners: (() => void)[] = [];
+
+  /** Called after every snapshot refresh (other views reload their own data then). */
+  onRefresh(fn: () => void) {
+    this.refreshListeners.push(fn);
+  }
 
   start() {
     handleUnauthorized(() => {
@@ -224,6 +230,7 @@ class Store {
         this.lastSeq = Math.max(this.lastSeq, snap.seq);
         this.lastSyncAt = Date.now();
         this.loaded = true;
+        for (const fn of this.refreshListeners) fn();
       } while (this.refreshAgain);
     } catch (e) {
       this.toast(`Could not load data: ${e instanceof Error ? e.message : String(e)}`, 'error');

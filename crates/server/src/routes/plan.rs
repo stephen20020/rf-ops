@@ -49,7 +49,10 @@ async fn board(State(s): State<AppState>, Path(id): Path<Id>) -> ApiResult<Json<
     ensure_show(&s, id).await?;
     let (st, names) = plan_store::load(&s.pool, id).await?;
     let b = st.board();
-    let cur = st.current_visit().cloned();
+    // Before the show, mixes come from the first song.
+    let cur = st.current_visit().cloned().or_else(|| {
+        st.next_song_after(None).map(|song| rfops_core::plan::Visit { no: 1, song })
+    });
     let devices: Vec<Value> = st
         .devices
         .iter()

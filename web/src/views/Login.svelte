@@ -17,7 +17,7 @@
     } catch {
       /* ignore */
     }
-    if (location.hash.startsWith('#/login') || location.hash.startsWith('#/join')) location.hash = '#/backstage';
+    if (location.hash.startsWith('#/login') || location.hash.startsWith('#/join')) location.hash = '#/board';
   }
 
   // Sign-in (docs/interface-spec.md §1.1): name + PIN for Leads, A2s and FOH; a 6-digit code
@@ -58,7 +58,7 @@
     }
     busy = false;
     digits = '';
-    if (ok && (location.hash.startsWith('#/login') || location.hash.startsWith('#/join'))) location.hash = '#/backstage';
+    if (ok && (location.hash.startsWith('#/login') || location.hash.startsWith('#/join'))) location.hash = '#/board';
   }
 
   function press(k: string) {

@@ -49,7 +49,15 @@ with name + PIN, helpers with a 6-digit join code, and wall/FOH screens are enro
 [`docs/show-files.md`](docs/show-files.md), including how to have an AI agent write a show file from
 the band's documents. Example: [`examples/hf2026-afternoon-friday.yaml`](examples/hf2026-afternoon-friday.yaml).
 
-Screens:
+Screens (new, on the core rules):
+
+- **Backstage** (`#/board`): wall and phones. A tile per device (who has it, mix, battery), the jobs list (overdue, during
+  this song, before the next song), swaps (Swap… → spare → In hand), passes, plan conflicts, count-in.
+- **FOH** (`#/channels`): console channels with who's on each now, swaps to confirm "Done at console", IEM mixes.
+- **Admin → Plot / Show file / Devices**: edit who has what per song (any time), import/export show files, devices.
+- **Classic** (`#/backstage`, `#/foh`, Admin → Classic kits): the earlier kit-based screens, kept for now.
+
+Earlier screens:
 
 - **Backstage** (`#/backstage`) — wall touchscreen and A2 phones: current/next song, performer cards
   with kits and battery state, alerts with ack/resolve, upcoming handoffs to tick off, "Mine" filter

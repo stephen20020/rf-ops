@@ -6,10 +6,14 @@
   import AssignmentGrid from '../components/admin/AssignmentGrid.svelte';
   import DataTools from '../components/admin/DataTools.svelte';
   import MidiSetup from '../components/admin/MidiSetup.svelte';
+  import PlotGrid from '../components/admin/PlotGrid.svelte';
+  import ShowFile from '../components/admin/ShowFile.svelte';
+  import Devices from '../components/admin/Devices.svelte';
 
-  const TABS = ['Assignments', 'Show & kits', 'MIDI', 'Inventory', 'People', 'Data'] as const;
+  const TABS = ['Plot', 'Show file', 'Devices', 'People', 'MIDI', 'Show & kits', 'Inventory', 'Data', 'Assignments'] as const;
   type Tab = (typeof TABS)[number];
-  let tab = $state<Tab>('Assignments');
+  let tab = $state<Tab>('Plot');
+  const CLASSIC: Tab[] = ['Assignments', 'Show & kits'];
 
   const conflictCount = $derived(
     (store.show?.conflicts.by_song ?? []).reduce((n, s) => n + s.conflicts.length, 0) +
@@ -21,15 +25,21 @@
   <div class="row tabs" role="tablist">
     {#each TABS as t (t)}
       <button role="tab" aria-selected={tab === t} class:primary={tab === t} onclick={() => (tab = t)}>
-        {t}{#if t === 'Assignments' && conflictCount} <span class="pill crit">{conflictCount}</span>{/if}
+        {t === 'Assignments' ? 'Classic kits' : t}{#if t === 'Assignments' && conflictCount} <span class="pill crit">{conflictCount}</span>{/if}
       </button>
     {/each}
     {#if !store.canEdit}<span class="muted">Read-only: your role cannot edit.</span>{/if}
   </div>
-  {#if store.showMode}
+  {#if store.showMode && CLASSIC.includes(tab)}
     <div class="lock" data-testid="show-lock">🔒 <b>Show mode:</b> kits and assignments are locked. Use <b>Swap to spare</b> backstage, or switch the show back to rehearsal in Show &amp; kits to edit.</div>
   {/if}
-  {#if tab === 'Inventory'}
+  {#if tab === 'Plot'}
+    <PlotGrid />
+  {:else if tab === 'Show file'}
+    <ShowFile />
+  {:else if tab === 'Devices'}
+    <Devices />
+  {:else if tab === 'Inventory'}
     <Inventory />
   {:else if tab === 'People'}
     <People />

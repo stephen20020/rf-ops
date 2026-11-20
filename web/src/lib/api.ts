@@ -51,7 +51,7 @@ let operatorName = '';
 export function setOperatorName(n: string) {
   operatorName = n;
 }
-function nameHeader(): Record<string, string> {
+export function nameHeader(): Record<string, string> {
   // Header values must be ISO-8859-1; encode anything else.
   return operatorName ? { 'x-rfops-actor': /^[\x20-\x7e]*$/.test(operatorName) ? operatorName : encodeURIComponent(operatorName) } : {};
 }

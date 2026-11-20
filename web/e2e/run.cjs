@@ -261,7 +261,7 @@ async function timed(fn) {
     await admin.page.getByTestId('confirm-show-mode').click();
     await back.page.getByTestId('mode').filter({ hasText: 'SHOW MODE' }).waitFor({ timeout: 1000 });
     await admin.page.getByTestId('show-lock').waitFor({ timeout: 1000 });
-    await admin.page.getByRole('tab', { name: /Assignments/ }).click();
+    await admin.page.getByRole('tab', { name: /Classic kits/ }).click();
     const firstCell = admin.page.locator('td select').first();
     assert.equal(await firstCell.isDisabled(), true, 'grid locked');
     // Server enforces it too.

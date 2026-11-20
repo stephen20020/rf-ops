@@ -8,12 +8,15 @@
   import Admin from './views/Admin.svelte';
   import Report from './views/Report.svelte';
   import Takeover from './views/Takeover.svelte';
+  import Board from './views/Board.svelte';
+  import Channels from './views/Channels.svelte';
   import SwapBanner from './components/SwapBanner.svelte';
 
-  type Route = 'backstage' | 'foh' | 'admin' | 'login' | 'join' | 'report' | 'takeover';
+  type Route = 'board' | 'channels' | 'backstage' | 'foh' | 'admin' | 'login' | 'join' | 'report' | 'takeover';
+  const ROUTES: Route[] = ['board', 'channels', 'backstage', 'foh', 'admin', 'login', 'join', 'report', 'takeover'];
   function parse(): Route {
     const h = location.hash.replace(/^#\/?/, '').split('?')[0];
-    return (['backstage', 'foh', 'admin', 'login', 'join', 'report', 'takeover'] as Route[]).includes(h as Route) ? (h as Route) : 'backstage';
+    return ROUTES.includes(h as Route) ? (h as Route) : 'board';
   }
   let route = $state<Route>(parse());
   $effect(() => {
@@ -43,7 +46,11 @@
   <TopBar {route} />
   <SwapBanner />
   <main>
-    {#if route === 'foh'}
+    {#if route === 'board'}
+      <Board />
+    {:else if route === 'channels'}
+      <Channels />
+    {:else if route === 'foh'}
       <Foh />
     {:else if route === 'admin'}
       <Admin />

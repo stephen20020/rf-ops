@@ -39,7 +39,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/shows/{id}/undo", post(undo))
         .route("/api/shows/{id}/batteries", get(batteries))
         .route("/api/devices/{id}/battery", post(battery_check))
-        .route("/api/shows/{id}/plot", put(set_cell))
+        .route("/api/shows/{id}/plot", put(set_cell).get(get_plot))
         .route("/api/shows/{id}/passes", post(add_pass))
         .route("/api/passes/{pid}", delete(delete_pass))
         .route("/api/devices/new", post(create_device))
@@ -617,6 +617,25 @@ async fn set_cell(
     log_event(&mut tx, &actor, "plot.changed", &json!({ "show_id": id, "device_id": b.device, "song_id": b.song, "performer_id": b.performer, "clear": b.clear })).await?;
     tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// The raw plot for editing: explicit cells (song None = Default) and passes.
+async fn get_plot(State(s): State<AppState>, Path(id): Path<Id>) -> ApiResult<Json<Value>> {
+    let cells: Vec<(Id, i64, Option<Id>)> =
+        sqlx::query_as("SELECT device_id, song_key, performer_id FROM plot_cells WHERE show_id = ?")
+            .bind(id)
+            .fetch_all(&s.pool)
+            .await?;
+    let passes: Vec<(Id, Id, Id, i64, Option<Id>)> = sqlx::query_as(
+        "SELECT id, device_id, song_id, seq, to_performer_id FROM passes WHERE show_id = ? ORDER BY song_id, device_id, seq",
+    )
+    .bind(id)
+    .fetch_all(&s.pool)
+    .await?;
+    Ok(Json(json!({
+        "cells": cells.iter().map(|(d, k, p)| json!({ "device": d, "song": if *k == 0 { None } else { Some(*k) }, "performer": p })).collect::<Vec<_>>(),
+        "passes": passes.iter().map(|(i, d, sg, q, to)| json!({ "id": i, "device": d, "song": sg, "seq": q, "to": to })).collect::<Vec<_>>(),
+    })))
 }
 
 #[derive(Deserialize)]

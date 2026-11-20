@@ -8,9 +8,10 @@
 <header>
   <nav class="row">
     <strong class="brand">RF Ops</strong>
-    <a href="#/backstage" class:active={route === 'backstage'}>Backstage</a>
-    <a href="#/foh" class:active={route === 'foh'}>FOH</a>
+    <a href="#/board" class:active={route === 'board'}>Backstage</a>
+    <a href="#/channels" class:active={route === 'channels'}>FOH</a>
     <a href="#/admin" class:active={route === 'admin'}>Admin</a>
+    <a class="classic" href={route === 'channels' ? '#/foh' : '#/backstage'} class:active={route === 'backstage' || route === 'foh'} title="The previous screens (kits)">Classic</a>
   </nav>
   <div class="row right">
     <select
@@ -48,6 +49,7 @@
   nav a { padding: 8px 10px; border-radius: 8px; text-decoration: none; color: var(--muted); font-weight: 600; }
   nav a.active { color: var(--text); background: var(--panel-2); }
   .right { margin-left: auto; }
+  nav a.classic { font-size: 0.8rem; font-weight: 500; }
   select { max-width: 220px; }
   .op { color: var(--muted); text-decoration: none; font-size: 0.9rem; }
   .small { min-height: 32px; padding: 0 8px; font-size: 0.85rem; }
