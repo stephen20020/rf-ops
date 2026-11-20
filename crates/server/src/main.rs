@@ -12,6 +12,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let seed_demo = std::env::args().any(|a| a == "--seed-demo");
+    let seed_hf2026 = std::env::args().any(|a| a == "--seed-hf2026");
     let db_url = std::env::var("RFOPS_DB").unwrap_or_else(|_| "sqlite://rfops.db".into());
     let addr: SocketAddr = std::env::var("RFOPS_ADDR")
         .unwrap_or_else(|_| "0.0.0.0:8080".into())
@@ -24,6 +25,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = db::connect(&db_url).await?;
     if seed_demo && seed::seed_demo(&pool).await? {
         tracing::info!("demo data inserted");
+    }
+    if seed_hf2026 && seed::seed_hf2026(&pool).await? {
+        tracing::info!("HF 2026 template inserted");
     }
     let mut state = AppState::new(pool).await?;
     // Backups go next to the database file unless RFOPS_BACKUP_DIR says otherwise.

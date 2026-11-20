@@ -178,6 +178,20 @@ impl Kit {
     pub fn portable_items(&self) -> impl Iterator<Item = Id> + '_ {
         [self.carrier_id, self.element_id].into_iter().flatten()
     }
+
+    /// Items only one performer can use at a time. An IEM transmitter broadcasts to any number
+    /// of packs (e.g. three drummers' packs all on TX1), so it is not exclusive; a mic receiver
+    /// channel or guitar receiver is.
+    pub fn exclusive_items(&self) -> impl Iterator<Item = Id> + '_ {
+        let base = if self.kind == KitKind::Iem {
+            None
+        } else {
+            self.base_id
+        };
+        [base, self.carrier_id, self.element_id]
+            .into_iter()
+            .flatten()
+    }
 }
 
 /// One assignment row.

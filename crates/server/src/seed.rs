@@ -574,3 +574,222 @@ pub async fn seed_demo(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
     s.tx.commit().await?;
     Ok(true)
 }
+
+/// Starter template from the HF 2026 dLive system plan: 12 wireless mics named by colour on console
+/// Ch 33–44 (DM64 53–64), IEM transmitters TX1–TX10 fixed to their mix sources, and the console
+/// IEM stations. Performer names for the vocal mics are left for the operator to fill in.
+/// Inserts only into an empty database; returns true when data was inserted.
+pub async fn seed_hf2026(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
+    let existing: Option<i64> = sqlx::query_scalar("SELECT id FROM equipment LIMIT 1")
+        .fetch_optional(pool)
+        .await?;
+    if existing.is_some() {
+        return Ok(false);
+    }
+    let mut s = Seeder {
+        tx: pool.begin().await?,
+        eq: HashMap::new(),
+    };
+
+    for (name, role) in [
+        ("Admin", "admin"),
+        ("A2 Wireless", "a2"),
+        ("A2 Band", "a2"),
+        ("FOH", "foh"),
+    ] {
+        sqlx::query("INSERT INTO users (name, role) VALUES (?, ?)")
+            .bind(name)
+            .bind(role)
+            .execute(&mut *s.tx)
+            .await?;
+    }
+
+    // Mic receivers: 3x ULXD4Q = 12 channels. Named ULXD-n so they don't clash with IEM "RXn".
+    for rx in 1..=3 {
+        let label = format!("ULXD-{rx}");
+        s.equipment("receiver", "Shure", "ULXD4Q", &label, None, None, None)
+            .await?;
+        for ch in 1..=4 {
+            s.equipment(
+                "receiver_channel",
+                "Shure",
+                "ULXD4Q",
+                &format!("ULXD-{rx}/{ch}"),
+                Some(&label),
+                Some(ch),
+                None,
+            )
+            .await?;
+        }
+    }
+    const COLOURS: [&str; 8] = [
+        "Yellow", "Red", "Blue", "Green", "Black", "White", "Orange", "Tan",
+    ];
+    for c in COLOURS {
+        s.simple("handheld_tx", "Shure", "ULXD2", c).await?;
+    }
+    for i in 1..=4 {
+        s.simple("bodypack_tx", "Shure", "ULXD1", &format!("Bpack{i}"))
+            .await?;
+    }
+
+    // IEM: TX1–TX10 (Sennheiser; XSW vs SR IEM G4 split to confirm), packs RX1–RX10.
+    for i in 1..=10 {
+        s.simple(
+            "iem_tx_channel",
+            "Sennheiser",
+            "IEM TX (model TBC)",
+            &format!("TX{i}"),
+        )
+        .await?;
+        s.simple(
+            "iem_pack",
+            "Sennheiser",
+            "IEM pack (model TBC)",
+            &format!("RX{i}"),
+        )
+        .await?;
+    }
+    // Guitar wireless in inventory; which guitarists use them is to confirm.
+    for (label, model) in [
+        ("GLXD6-1", "GLXD6 Z2"),
+        ("GLXD6-2", "GLXD6 Z2"),
+        ("GLXD6+-1", "GLXD6+ Z3"),
+    ] {
+        s.simple("guitar_receiver", "Shure", model, label).await?;
+    }
+    for (label, model) in [
+        ("GLXD1-1", "GLXD1 Z2"),
+        ("GLXD1-2", "GLXD1 Z2"),
+        ("GLXD1+-1", "GLXD1+ Z3"),
+    ] {
+        s.simple("guitar_pack", "Shure", model, label).await?;
+    }
+
+    let show = sqlx::query("INSERT INTO shows (name, mode) VALUES ('HF 2026', 'setup')")
+        .execute(&mut *s.tx)
+        .await?
+        .last_insert_rowid();
+    // Run order isn't set yet; segments stand in until it is.
+    for (i, title) in ["Afternoon set", "Changeover", "Evening set"]
+        .iter()
+        .enumerate()
+    {
+        sqlx::query("INSERT INTO songs (show_id, position, title) VALUES (?, ?, ?)")
+            .bind(show)
+            .bind(i as i64 + 1)
+            .bind(*title)
+            .execute(&mut *s.tx)
+            .await?;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn kit(
+        s: &mut Seeder<'_>,
+        show: i64,
+        kind: &str,
+        name: &str,
+        base: &str,
+        carrier: &str,
+        ch: Option<i64>,
+        mix: Option<&str>,
+    ) -> Result<i64, sqlx::Error> {
+        Ok(sqlx::query(
+            "INSERT INTO kits (show_id, kind, name, base_id, carrier_id, console_channel, console_channel_name, iem_mix)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(show)
+        .bind(kind)
+        .bind(name)
+        .bind(s.eq[base])
+        .bind(s.eq[carrier])
+        .bind(ch)
+        .bind(ch.map(|_| name.to_owned()))
+        .bind(mix)
+        .execute(&mut *s.tx)
+        .await?
+        .last_insert_rowid())
+    }
+
+    // Wireless mics on console Ch 33–44, in fader-bank order (Layer A bank 1).
+    let packs: Vec<String> = COLOURS
+        .iter()
+        .map(|c| c.to_string())
+        .chain((1..=4).map(|i| format!("Bpack{i}")))
+        .collect();
+    for (i, pack) in packs.iter().enumerate() {
+        let rx = format!("ULXD-{}/{}", i / 4 + 1, i % 4 + 1);
+        kit(
+            &mut s,
+            show,
+            "mic",
+            pack,
+            &rx,
+            pack,
+            Some(33 + i as i64),
+            None,
+        )
+        .await?;
+    }
+
+    // IEM: transmitters stay fixed; only the people change. RX1, RX3 and RX6 all listen to TX1.
+    let iem = [
+        ("TX1 Drums · RX1", "TX1", "RX1", "ME-1 1 (drums)"),
+        ("TX1 Drums · RX3", "TX1", "RX3", "ME-1 1 (drums)"),
+        ("TX1 Drums · RX6", "TX1", "RX6", "ME-1 1 (drums)"),
+        ("TX2 Bass · RX2", "TX2", "RX2", "ME-1 2 (bass)"),
+        ("TX4 Nord · RX4", "TX4", "RX4", "ME-1 4 (Nord)"),
+        ("TX7 · RX7", "TX7", "RX7", "St Aux 7 (Choir Dir)"),
+        ("TX8 · RX8", "TX8", "RX8", "St Aux 8 (Orch Dir)"),
+        ("TX9 Chandler · RX9", "TX9", "RX9", "St Aux 9 (Chandler)"),
+        ("TX10 Acoustic · RX10", "TX10", "RX10", "ME-1 10 (acoustic)"),
+    ];
+    let mut iem_kits = HashMap::new();
+    for (name, tx, rx, mix) in iem {
+        iem_kits.insert(
+            name,
+            kit(&mut s, show, "iem", name, tx, rx, None, Some(mix)).await?,
+        );
+    }
+
+    // Stations with a known IEM feed. Names are roles until the crew list is in.
+    for (performer, role, kit_name) in [
+        ("Drums", "Band", "TX1 Drums · RX1"),
+        ("Bass", "Band", "TX2 Bass · RX2"),
+        ("Keys (Nord)", "Band", "TX4 Nord · RX4"),
+        ("Acoustic", "Band", "TX10 Acoustic · RX10"),
+        ("Choir Director", "Directors", "TX7 · RX7"),
+        ("Orchestra Director", "Directors", "TX8 · RX8"),
+        ("Chandler Moore", "Guest", "TX9 Chandler · RX9"),
+    ] {
+        let p = sqlx::query("INSERT INTO performers (name, role) VALUES (?, ?)")
+            .bind(performer)
+            .bind(role)
+            .execute(&mut *s.tx)
+            .await?
+            .last_insert_rowid();
+        sqlx::query(
+            "INSERT INTO assignments (show_id, performer_id, kind, kit_id) VALUES (?, ?, 'iem', ?)",
+        )
+        .bind(show)
+        .bind(p)
+        .bind(iem_kits[kit_name])
+        .execute(&mut *s.tx)
+        .await?;
+    }
+
+    let actor = Actor {
+        name: "seed".into(),
+        client_id: None,
+        role: None,
+    };
+    log_event(
+        &mut s.tx,
+        &actor,
+        "seed.hf2026",
+        &serde_json::json!({ "show_id": show }),
+    )
+    .await?;
+    s.tx.commit().await?;
+    Ok(true)
+}

@@ -15,6 +15,28 @@ Living document. Confirmed facts come from the owner; everything else is marked 
 | Playback | MultiTracks Playback on a **MacBook** (macOS version TBD), **iConnectivity PlayAUDIO1U** | MIDI via RF Ops bridge on the Mac (Phase 4) |
 | Network | Dante and control on the **same network** | — |
 
+## Console system (from the HF 2026 dLive system plan, Nov 2026)
+
+- Rig: S7000 surface, DM64 MixRack, 4× DX168 (DX 1/2 band station, DX 3/4 orchestra pit).
+- **Wireless mics: 12 channels on console Ch 33–44, DM64 inputs 53–64.** Vocal mic IDs are
+  colours: Yellow, Red, Blue, Green, Black, White, Orange, Tan (handhelds), then Bpack1–4. They are
+  fader bank 1 on Layer A in that order. Direct outs to ME channels 23–34.
+- **IEM: transmitters stay fixed all day; only the people change.**
+  - TX1 ← ME-1 1 (drums), TX2 ← ME-1 2 (bass), TX4 ← ME-1 4 (Nord), TX10 ← ME-1 10 (acoustic).
+  - TX7–TX9 ← St Aux 7–9 (Choir Director, Orchestra Director, Chandler Moore), on DM64 outs 13–18.
+  - TX3, TX5 and TX6 are unused.
+  - **RX1, RX3 and RX6 all listen to TX1**; every other pack matches its TX number.
+  - One IEM transmitter feeding several packs is normal, so RF Ops does not treat it as a conflict.
+    A pack or a mic receiver channel on two people still is.
+- ME-1 6 feeds Andrew's own IEM in the evening (not in RF Ops inventory).
+- Playback on Ch 109–116 (PB Click, PB Guide, Tracks, BGV, Keys/Pad), moving to Dante. PB Guide
+  plus talkback go to ME-1 via the Comms aux.
+- There are two sets (afternoon/evening) with a changeover. The run order isn't set yet.
+- Open item in the plan: RF coordination for the 12 wireless channels.
+
+Template: `rfops-server --seed-hf2026` on an empty database loads this layout. Performer names for
+the colour mics are left blank to fill in.
+
 ## Operations
 
 - Many performers and many handoffs per show.
@@ -26,6 +48,14 @@ Living document. Confirmed facts come from the owner; everything else is marked 
 60 performers, 12 receivers (48 ch), 20 IEM channels, 40 songs/segments, 200 handoffs per show, 10 concurrent clients.
 
 ## Open questions
+
+- [ ] Which IEM transmitters/packs are XSW and which are SR IEM G4 (3 G4 have Ethernet).
+- [ ] Who wears RX3 and RX6 (both on the TX1 drum mix)?
+- [ ] TX7–TX9: the plan has them as director/Chandler mixes, and also as console mixes for
+      Stephen, Sam and Chandler in the afternoon. Who wears which pack in each set?
+- [ ] Capsules on the colour handhelds and headsets/lavs on Bpack1–4.
+- [ ] Spare mics: all 12 ULX-D channels are in use. Is there a spare handheld or receiver channel?
+- [ ] Which guitarists use the GLXD6/GLXD6+ (the plan wires EG1–3 to the band box and DM64 DIs)?
 
 - [ ] Number of ULXD4Q receivers and their firmware versions.
 - [ ] Is the dLive's built-in Shure integration in use? (Affects the concurrent-connection bench test.)

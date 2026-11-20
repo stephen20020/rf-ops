@@ -31,6 +31,9 @@ cd web && npm install && npm run build && cd ..
 cargo run -p rfops-server -- --seed-demo
 ```
 
+To start from the HF 2026 console layout instead (12 colour mics on Ch 33–44, TX1–TX10), use
+`--seed-hf2026` on an empty database.
+
 Open `http://<server-ip>:8080` on any device on the network. `--seed-demo` loads demo data
 (ULXD4Q receivers, XSW and G4 IEMs, GLXD guitar packs, 11 performers, an 8-segment service) only
 when the database is empty. Pick an operator on first load (e.g. *A2 Stage Left*).

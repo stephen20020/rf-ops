@@ -87,7 +87,9 @@ pub fn conflicts_for(
                 continue;
             };
             for item in kit.items() {
-                holders.entry(item).or_default().insert((performer, kit_id));
+                if kit.exclusive_items().any(|i| i == item) {
+                    holders.entry(item).or_default().insert((performer, kit_id));
+                }
                 if let Some(&status) = statuses.get(&item) {
                     if status.is_unusable() {
                         out.push(Conflict::UnusableItem {
@@ -776,6 +778,49 @@ mod tests {
         assert_eq!(plan[0].from_song, Some(102));
         assert_eq!(plan[0].to_song, Some(103));
         assert_eq!(plan[1].to_song, None);
+    }
+
+    #[test]
+    fn shared_iem_transmitter_is_not_a_conflict() {
+        // Three packs listening to the same IEM transmitter (TX1 = drum mix).
+        let k = kits(vec![
+            kit(20, KitKind::Iem, Some(5001), Some(6001), None),
+            kit(21, KitKind::Iem, Some(5001), Some(6003), None),
+            kit(22, KitKind::Iem, Some(5001), Some(6006), None),
+        ]);
+        let a = A::new()
+            .add(1, KitKind::Iem, Some(20), None)
+            .add(2, KitKind::Iem, Some(21), None)
+            .add(3, KitKind::Iem, Some(22), None)
+            .0;
+        assert!(conflicts_for(&a, &k, &HashMap::new(), None).is_empty());
+        // The same pack on two people still is.
+        let b = A::new()
+            .add(1, KitKind::Iem, Some(20), None)
+            .add(2, KitKind::Iem, Some(20), None)
+            .0;
+        assert_eq!(
+            conflicts_for(&b, &k, &HashMap::new(), None),
+            vec![Conflict::ItemShared {
+                item_id: 6001,
+                performer_ids: vec![1, 2],
+                kit_ids: vec![20]
+            }]
+        );
+    }
+
+    #[test]
+    fn shared_mic_receiver_channel_is_a_conflict() {
+        let k = kits(vec![mic(10, 1000, 2000, None), mic(11, 1000, 2001, None)]);
+        let a = A::new().def(1, 10).def(2, 11).0;
+        assert_eq!(
+            conflicts_for(&a, &k, &HashMap::new(), None),
+            vec![Conflict::ItemShared {
+                item_id: 1000,
+                performer_ids: vec![1, 2],
+                kit_ids: vec![10, 11]
+            }]
+        );
     }
 
     #[test]

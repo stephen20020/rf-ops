@@ -405,3 +405,32 @@ async fn demo_seed_is_consistent_and_handoffs_can_be_marked() {
     assert!(snap["show"]["handoffs_done"].as_array().unwrap().is_empty());
     let _ = &srv.pool;
 }
+
+#[tokio::test]
+async fn hf2026_template_is_consistent() {
+    let pool = db::connect("sqlite::memory:").await.unwrap();
+    assert!(seed::seed_hf2026(&pool).await.unwrap());
+    assert!(!seed::seed_hf2026(&pool).await.unwrap());
+    let srv = Srv::start_with(pool).await;
+    let show = srv.get("/api/snapshot").await["shows"][0]["id"]
+        .as_i64()
+        .unwrap();
+    let snap = srv.get(&format!("/api/snapshot?show_id={show}")).await;
+    let s = &snap["show"];
+    assert!(
+        s["conflicts"]["by_song"].as_array().unwrap().is_empty(),
+        "shared TX1 must not conflict: {}",
+        s["conflicts"]
+    );
+    let kits = s["kits"].as_array().unwrap();
+    let mics: Vec<_> = kits.iter().filter(|k| k["kind"] == "mic").collect();
+    assert_eq!(mics.len(), 12);
+    let chans: Vec<i64> = mics
+        .iter()
+        .map(|k| k["console_channel"].as_i64().unwrap())
+        .collect();
+    assert_eq!(chans, (33..=44).collect::<Vec<_>>());
+    assert_eq!(mics[0]["name"], "Yellow");
+    assert_eq!(mics[11]["name"], "Bpack4");
+    assert_eq!(kits.iter().filter(|k| k["kind"] == "iem").count(), 9);
+}

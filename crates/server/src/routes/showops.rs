@@ -120,7 +120,7 @@ async fn swap(
 
     let assignments = plan.core_assignments();
     let kits = plan.core_kits();
-    let to_items: HashSet<i64> = kits[&to.id].items().collect();
+    let to_items: HashSet<i64> = kits[&to.id].exclusive_items().collect();
     let mut changes: Vec<(i64, Vec<i64>)> = Vec::new();
     for &song in &affected {
         let eff = assign::effective_assignment(&assignments, Some(song));
@@ -133,7 +133,7 @@ async fn swap(
                 if *k == to.id
                     || kits
                         .get(k)
-                        .is_some_and(|kk| kk.items().any(|i| to_items.contains(&i)))
+                        .is_some_and(|kk| kk.exclusive_items().any(|i| to_items.contains(&i)))
                 {
                     let other: String =
                         sqlx::query_scalar("SELECT name FROM performers WHERE id = ?")
