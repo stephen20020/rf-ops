@@ -13,6 +13,8 @@ pub enum ApiError {
     BadRequest(String),
     #[error("{0}")]
     Conflict(String),
+    #[error("{0}")]
+    Forbidden(String),
     #[error(transparent)]
     Db(#[from] sqlx::Error),
 }
@@ -29,6 +31,7 @@ impl IntoResponse for ApiError {
             ApiError::NotFound => (StatusCode::NOT_FOUND, self.to_string()),
             ApiError::BadRequest(m) => (StatusCode::BAD_REQUEST, m.clone()),
             ApiError::Conflict(m) => (StatusCode::CONFLICT, m.clone()),
+            ApiError::Forbidden(m) => (StatusCode::FORBIDDEN, m.clone()),
             ApiError::Db(sqlx::Error::RowNotFound) => (StatusCode::NOT_FOUND, "not found".into()),
             ApiError::Db(e) => {
                 if let Some(db) = e.as_database_error() {

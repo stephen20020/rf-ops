@@ -1,6 +1,7 @@
-mod inventory;
-mod ops;
-mod shows;
+pub(crate) mod inventory;
+mod live;
+pub(crate) mod ops;
+pub(crate) mod shows;
 
 use axum::{routing::get, Json, Router};
 use serde_json::{json, Value};
@@ -13,6 +14,7 @@ pub fn router() -> Router<AppState> {
         .merge(inventory::router())
         .merge(shows::router())
         .merge(ops::router())
+        .merge(live::router())
 }
 
 async fn health() -> Json<Value> {

@@ -31,6 +31,14 @@ pub fn now() -> String {
 pub struct Actor {
     pub name: String,
     pub client_id: Option<String>,
+    /// Role from the users table; `None` while no users are configured (bootstrap mode).
+    pub role: Option<String>,
+}
+
+impl Actor {
+    pub fn is_admin(&self) -> bool {
+        self.role.as_deref().is_none_or(|r| r == "admin")
+    }
 }
 
 /// Append to the event log inside the caller's transaction. Returns the new sequence number.

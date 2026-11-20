@@ -291,6 +291,9 @@ async fn create_user(
     actor: Actor,
     Json(n): Json<NewUser>,
 ) -> ApiResult<(StatusCode, Json<User>)> {
+    if !actor.is_admin() {
+        return Err(ApiError::Forbidden("only admins can add operators".into()));
+    }
     let role = n.role.unwrap_or_else(|| "a2".into());
     if !ROLES.contains(&role.as_str()) {
         return Err(ApiError::bad(format!("role must be one of {ROLES:?}")));

@@ -16,7 +16,7 @@ impl T {
     async fn new() -> Self {
         let pool = db::connect("sqlite::memory:").await.unwrap();
         T {
-            app: app(AppState { pool }),
+            app: app(AppState::new(pool).await.unwrap()),
         }
     }
 
@@ -650,4 +650,63 @@ async fn assignment_validation() {
             .await;
         assert_eq!(s, StatusCode::BAD_REQUEST, "{why}: {v}");
     }
+}
+
+#[tokio::test]
+async fn assignment_cell_editing() {
+    let t = T::new().await;
+    let show = t.id("/api/shows", json!({ "name": "S" })).await;
+    let s1 = t
+        .id(&format!("/api/shows/{show}/songs"), json!({ "title": "A" }))
+        .await;
+    let p = t.id("/api/performers", json!({ "name": "P" })).await;
+    let ch = t.equipment("receiver_channel", "RX1-1").await;
+    let hh = t.equipment("handheld_tx", "HH1").await;
+    let k = t
+        .id(
+            &format!("/api/shows/{show}/kits"),
+            json!({ "kind": "mic", "name": "k", "base_id": ch, "carrier_id": hh }),
+        )
+        .await;
+    let cell = |song: Value, kits: Value, inherit: bool| json!({ "performer_id": p, "kind": "mic", "song_id": song, "kit_ids": kits, "inherit": inherit });
+
+    let put = |body: Value| {
+        let t = &t;
+        async move {
+            let (s, v) = t
+                .req(
+                    "PUT",
+                    &format!("/api/shows/{show}/assignments/cell"),
+                    Some(body),
+                    true,
+                )
+                .await;
+            assert_eq!(s, StatusCode::OK, "{v}");
+        }
+    };
+    put(cell(Value::Null, json!([k]), false)).await;
+    put(cell(Value::Null, json!([k]), false)).await; // idempotent replace, not duplicate
+    put(cell(json!(s1), json!([]), false)).await; // none in song A
+    let full = t.get(&format!("/api/shows/{show}")).await;
+    assert_eq!(full["assignments"].as_array().unwrap().len(), 2);
+    let eff = t
+        .get(&format!("/api/shows/{show}/effective?song_id={s1}"))
+        .await;
+    assert!(eff.get(p.to_string()).is_none());
+
+    put(cell(json!(s1), json!([]), true)).await; // back to default
+    let eff = t
+        .get(&format!("/api/shows/{show}/effective?song_id={s1}"))
+        .await;
+    assert_eq!(eff[p.to_string()], json!([k]));
+
+    let (s, _) = t
+        .req(
+            "PUT",
+            &format!("/api/shows/{show}/assignments/cell"),
+            Some(cell(Value::Null, json!([]), true)),
+            true,
+        )
+        .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "inherit on default column");
 }

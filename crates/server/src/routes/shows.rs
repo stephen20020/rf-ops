@@ -38,6 +38,10 @@ pub fn router() -> Router<AppState> {
         .route("/api/kits/{id}", patch(update_kit).delete(delete_kit))
         .route("/api/shows/{id}/assignments", post(create_assignment))
         .route("/api/assignments/{id}", delete(delete_assignment))
+        .route(
+            "/api/shows/{id}/assignments/cell",
+            axum::routing::put(set_cell),
+        )
         .route("/api/shows/{id}/effective", get(effective))
         .route("/api/shows/{id}/conflicts", get(conflicts))
         .route("/api/shows/{id}/handoffs", get(handoffs))
@@ -947,6 +951,106 @@ async fn create_assignment(
     ))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct SetCell {
+    pub performer_id: i64,
+    pub kind: String,
+    /// `None` = show default column.
+    pub song_id: Option<i64>,
+    /// Kits for this cell. Empty + song = "none in this song"; empty + default = no default.
+    #[serde(default)]
+    pub kit_ids: Vec<i64>,
+    /// Song cells only: remove the override so the default applies.
+    #[serde(default)]
+    pub inherit: bool,
+}
+
+/// Replace one (performer, kind, song) cell of the assignment grid atomically.
+async fn set_cell(
+    State(s): State<AppState>,
+    actor: Actor,
+    Path(show_id): Path<i64>,
+    Json(c): Json<SetCell>,
+) -> ApiResult<Json<AssignmentCellResult>> {
+    let kind = kit_kind(&c.kind)?;
+    if c.inherit && c.song_id.is_none() {
+        return Err(ApiError::bad("inherit only applies to song cells"));
+    }
+    let mut tx = s.pool.begin().await?;
+    fetch_show(&mut *tx, show_id).await?;
+    if let Some(song_id) = c.song_id {
+        let song = fetch_song(&mut *tx, song_id)
+            .await
+            .map_err(|_| ApiError::bad("song does not exist"))?;
+        if song.show_id != show_id {
+            return Err(ApiError::bad("song belongs to another show"));
+        }
+    }
+    for &kit_id in &c.kit_ids {
+        let k = fetch_kit(&mut *tx, kit_id)
+            .await
+            .map_err(|_| ApiError::bad("kit does not exist"))?;
+        if k.show_id != show_id || k.kind != kind.as_str() {
+            return Err(ApiError::bad(format!(
+                "kit {} is not a {} kit in this show",
+                k.name,
+                kind.as_str()
+            )));
+        }
+    }
+    sqlx::query(
+        "DELETE FROM assignments WHERE show_id = ? AND performer_id = ? AND kind = ? AND song_id IS ?",
+    )
+    .bind(show_id)
+    .bind(c.performer_id)
+    .bind(kind.as_str())
+    .bind(c.song_id)
+    .execute(&mut *tx)
+    .await?;
+    let rows: Vec<Option<i64>> = if c.inherit {
+        vec![]
+    } else if c.kit_ids.is_empty() {
+        if c.song_id.is_some() {
+            vec![None]
+        } else {
+            vec![]
+        }
+    } else {
+        c.kit_ids.iter().map(|k| Some(*k)).collect()
+    };
+    for kit in rows {
+        sqlx::query(
+            "INSERT INTO assignments (show_id, performer_id, kind, kit_id, song_id) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(show_id)
+        .bind(c.performer_id)
+        .bind(kind.as_str())
+        .bind(kit)
+        .bind(c.song_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    let payload = serde_json::json!({
+        "show_id": show_id, "performer_id": c.performer_id, "kind": kind.as_str(),
+        "song_id": c.song_id, "kit_ids": c.kit_ids, "inherit": c.inherit,
+    });
+    log_event(&mut tx, &actor, "assignment.cell_set", &payload).await?;
+    tx.commit().await?;
+    let plan = load_plan(&s.pool, show_id).await?;
+    let conflicts = assign::conflicts_for(
+        &plan.core_assignments(),
+        &plan.core_kits(),
+        &plan.statuses,
+        c.song_id,
+    );
+    Ok(Json(AssignmentCellResult { conflicts }))
+}
+
+#[derive(Serialize)]
+pub struct AssignmentCellResult {
+    conflicts: Vec<Conflict>,
+}
+
 async fn delete_assignment(
     State(s): State<AppState>,
     actor: Actor,
@@ -1005,6 +1109,10 @@ async fn conflicts(
     Path(id): Path<i64>,
 ) -> ApiResult<Json<ConflictReport>> {
     let plan = load_plan(&s.pool, id).await?;
+    Ok(Json(conflict_report(&plan)))
+}
+
+pub(crate) fn conflict_report(plan: &Plan) -> ConflictReport {
     let a = plan.core_assignments();
     let k = plan.core_kits();
     let mut by_song = Vec::new();
@@ -1017,10 +1125,10 @@ async fn conflicts(
             });
         }
     }
-    Ok(Json(ConflictReport {
+    ConflictReport {
         static_conflicts: assign::kind_mismatches(&a, &k),
         by_song,
-    }))
+    }
 }
 
 async fn handoffs(

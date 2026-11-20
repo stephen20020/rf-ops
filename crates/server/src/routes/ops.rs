@@ -18,6 +18,7 @@ use sqlx::FromRow;
 use crate::{
     db::{log_event, now, Actor},
     error::{ApiError, ApiResult},
+    hub::{events_after, Event},
     routes::{inventory::fetch_equipment, shows::fetch_show},
     AppState,
 };
@@ -288,7 +289,17 @@ async fn battery_status(
     Path(show_id): Path<i64>,
     Query(q): Query<BatteryStatusQuery>,
 ) -> ApiResult<Json<Vec<BatteryStatus>>> {
-    let show = fetch_show(&s.pool, show_id).await?;
+    Ok(Json(
+        compute_battery_status(&s.pool, show_id, q.max_age_minutes).await?,
+    ))
+}
+
+pub(crate) async fn compute_battery_status(
+    pool: &sqlx::SqlitePool,
+    show_id: i64,
+    max_age_minutes: Option<i64>,
+) -> ApiResult<Vec<BatteryStatus>> {
+    let show = fetch_show(pool, show_id).await?;
     let rows = sqlx::query_as::<_, BatteryRow>(
         "SELECT e.id, e.label, e.kind, bc.result, bc.checked_at, bc.checked_by
          FROM equipment e
@@ -298,7 +309,7 @@ async fn battery_status(
          ORDER BY e.label",
     )
     .bind(show_id)
-    .fetch_all(&s.pool)
+    .fetch_all(pool)
     .await?;
 
     let parse_time = |t: &str| {
@@ -308,7 +319,7 @@ async fn battery_status(
     };
     let rule = BatteryRule {
         required_since: show.call_time.as_deref().and_then(parse_time),
-        max_age_minutes: q.max_age_minutes.or(BatteryRule::default().max_age_minutes),
+        max_age_minutes: max_age_minutes.or(BatteryRule::default().max_age_minutes),
         ..BatteryRule::default()
     };
     let now = Utc::now();
@@ -333,7 +344,7 @@ async fn battery_status(
             }
         })
         .collect();
-    Ok(Json(out))
+    Ok(out)
 }
 
 // ---------------- alerts ----------------
@@ -526,19 +537,6 @@ async fn resolve_alert(
 
 // ---------------- events ----------------
 
-#[derive(Debug, Serialize, FromRow)]
-pub struct Event {
-    pub seq: i64,
-    pub at: String,
-    pub actor: String,
-    pub client_id: Option<String>,
-    #[sqlx(rename = "type")]
-    #[serde(rename = "type")]
-    pub kind: String,
-    #[sqlx(json)]
-    pub payload: serde_json::Value,
-}
-
 #[derive(Debug, Deserialize)]
 pub struct EventQuery {
     #[serde(default)]
@@ -551,10 +549,6 @@ async fn list_events(
     Query(q): Query<EventQuery>,
 ) -> ApiResult<Json<Vec<Event>>> {
     Ok(Json(
-        sqlx::query_as::<_, Event>("SELECT * FROM event_log WHERE seq > ? ORDER BY seq LIMIT ?")
-            .bind(q.after)
-            .bind(q.limit.unwrap_or(500).clamp(1, 5000))
-            .fetch_all(&s.pool)
-            .await?,
+        events_after(&s.pool, q.after, q.limit.unwrap_or(500).clamp(1, 5000)).await?,
     ))
 }

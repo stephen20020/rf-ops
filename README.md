@@ -4,7 +4,8 @@ Backstage wireless mic & IEM operations system: equipment, performer assignments
 checkout/return, battery checks, and alerts — shared live between backstage A2s and FOH on a local
 network, with no internet required.
 
-Status: **Phase 1 (core + data API)**. No UI yet. See [`docs/BRIEF.md`](docs/BRIEF.md) for the full
+Status: **Phase 2 (live sync + screens)**. Backstage wall/phone, FOH and Admin screens share state
+in real time over WebSocket. See [`docs/BRIEF.md`](docs/BRIEF.md) for the full
 plan and [`docs/requirements.md`](docs/requirements.md) for the venue's known setup and open questions.
 
 ## Layout
@@ -12,24 +13,46 @@ plan and [`docs/requirements.md`](docs/requirements.md) for the venue's known se
 | Path | What |
 |---|---|
 | `crates/core` | Pure domain logic — assignment overlay, conflicts, handoffs, battery rules, alert lifecycle. No I/O. |
-| `crates/server` | Axum HTTP API + SQLite (sqlx). Every mutation writes an `event_log` row in the same transaction. |
+| `crates/server` | Axum HTTP API + SQLite (sqlx). Every mutation writes an `event_log` row in the same transaction; a broadcaster pushes new events to WebSocket clients. |
+| `web` | Svelte 5 + TypeScript client (Backstage, FOH, Admin), served by the server from `web/dist`. |
 | `docs/` | Brief, research, requirements. |
 
 ## Run
 
-Requires Rust (stable).
+Requires Rust (stable) and Node 20.19+ (only to build the web client).
 
 ```bash
-cargo run -p rfops-server
+cd web && npm install && npm run build && cd ..
 ```
+
+```bash
+cargo run -p rfops-server -- --seed-demo
+```
+
+Open `http://<server-ip>:8080` on any device on the network. `--seed-demo` loads demo data
+(ULXD4Q receivers, XSW and G4 IEMs, GLXD guitar packs, 11 performers, an 8-segment service) only
+when the database is empty. Pick an operator on first load (e.g. *A2 Stage Left*).
+
+Screens:
+
+- **Backstage** (`#/backstage`) — wall touchscreen and A2 phones: current/next song, performer cards
+  with kits and battery state, alerts with ack/resolve, upcoming handoffs to tick off, "Mine" filter
+  for the A2's own performers, one-tap battery checks.
+- **FOH** (`#/foh`) — channel list by console channel and IEM mix: who is on it now and next song,
+  pack, battery, alerts.
+- **Admin** (`#/admin`) — assignment grid (default + per-song overrides, conflicts in red), show,
+  setlist and kits, inventory, performers and operators.
 
 Environment variables:
 
 - `RFOPS_DB` — SQLite URL (default `sqlite://rfops.db`)
 - `RFOPS_ADDR` — listen address (default `0.0.0.0:8080`)
+- `RFOPS_WEB` — built web client folder (default `web/dist`)
 
-Mutating requests need an `x-rfops-actor: <name>` header (PIN login replaces this in a later phase);
-`x-rfops-client: <id>` is optional and is recorded in the event log.
+Mutating requests need an `x-rfops-actor: <operator name>` header. Until the first operator exists,
+any name may act; after that the name must match an operator, and `viewer` operators are read-only.
+`x-rfops-client` is recorded in the event log; `x-rfops-idempotency-key` makes retries safe.
+(PIN sign-in comes in Phase 3.)
 
 ## Test
 
@@ -37,6 +60,22 @@ Mutating requests need an `x-rfops-actor: <name>` header (PIN login replaces thi
 cargo test
 cargo clippy --all-targets -- -D warnings
 ```
+
+```bash
+cd web && npm run check && npm run build && npm run test:e2e
+```
+
+The e2e suite drives three browsers against a real server: alert raise → FOH in < 1 s, ack and
+resolve sync, song advance, handoff ticks, server kill/restart with offline blocking and resync,
+48 px touch targets, and the viewer role. It needs Playwright with Chromium installed.
+
+## Live sync
+
+- `GET /api/ws?after=<seq>` — WebSocket. Sends `hello`, replays events after `seq` (or `resync` if
+  too far behind), then streams `event` messages as they commit.
+- `GET /api/snapshot?show_id=` — everything a screen needs in one call (clients refetch after events).
+- Commands carry an idempotency key; a retried command returns the original response instead of
+  applying twice.
 
 ## Concepts
 
@@ -52,7 +91,7 @@ cargo clippy --all-targets -- -D warnings
   retired items in use. Assignments are saved even when they conflict; the response lists conflicts so
   the editor can show them.
 
-## API (Phase 1)
+## API
 
 | Method & path | Purpose |
 |---|---|
@@ -73,4 +112,9 @@ cargo clippy --all-targets -- -D warnings
 | `GET/POST /api/checkouts`, `POST /api/checkouts/{id}/return` | Checkout / return (`faulty` on return) |
 | `GET/POST /api/battery-checks`, `GET /api/shows/{id}/battery-status` | Manual battery checks and due status |
 | `GET/POST /api/alerts`, `POST /api/alerts/{id}/ack`, `POST /api/alerts/{id}/resolve` | Manual alerts and lifecycle |
-| `GET /api/events?after=` | Event log (basis for real-time sync in Phase 2) |
+| `GET /api/events?after=` | Event log |
+| `GET /api/snapshot?show_id=` | Full client state |
+| `GET /api/ws?after=` | Live event stream (WebSocket) |
+| `POST /api/shows/{id}/advance` | Next / previous non-skipped song |
+| `POST /api/shows/{id}/handoffs/done` | Tick / untick a handoff |
+| `PUT /api/shows/{id}/assignments/cell` | Set one assignment-grid cell atomically |
