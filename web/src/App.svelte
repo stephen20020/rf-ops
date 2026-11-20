@@ -10,10 +10,13 @@
   import Takeover from './views/Takeover.svelte';
   import Board from './views/Board.svelte';
   import Channels from './views/Channels.svelte';
+  import Checklist from './views/Checklist.svelte';
+  import Print from './views/Print.svelte';
+  import PostShow from './views/PostShow.svelte';
   import SwapBanner from './components/SwapBanner.svelte';
 
-  type Route = 'board' | 'channels' | 'backstage' | 'foh' | 'admin' | 'login' | 'join' | 'report' | 'takeover';
-  const ROUTES: Route[] = ['board', 'channels', 'backstage', 'foh', 'admin', 'login', 'join', 'report', 'takeover'];
+  type Route = 'board' | 'channels' | 'checklist' | 'print' | 'post-show' | 'backstage' | 'foh' | 'admin' | 'login' | 'join' | 'report' | 'takeover';
+  const ROUTES: Route[] = ['board', 'channels', 'checklist', 'print', 'post-show', 'backstage', 'foh', 'admin', 'login', 'join', 'report', 'takeover'];
   function parse(): Route {
     const h = location.hash.replace(/^#\/?/, '').split('?')[0];
     return ROUTES.includes(h as Route) ? (h as Route) : 'board';
@@ -42,6 +45,8 @@
   <div class="loading muted">Loading…</div>
 {:else if route === 'report'}
   <Report />
+{:else if route === 'print'}
+  <Print />
 {:else}
   <TopBar {route} />
   {#if store.offline}
@@ -54,6 +59,10 @@
   <main>
     {#if route === 'board'}
       <Board />
+    {:else if route === 'checklist'}
+      <Checklist />
+    {:else if route === 'post-show'}
+      <PostShow />
     {:else if route === 'channels'}
       <Channels />
     {:else if route === 'foh'}

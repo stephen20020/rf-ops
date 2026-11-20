@@ -10,6 +10,8 @@
     <strong class="brand">RF Ops</strong>
     <a href="#/board" class:active={route === 'board'}>Backstage</a>
     <a href="#/channels" class:active={route === 'channels'}>FOH</a>
+    <a href="#/checklist" class:active={route === 'checklist'} data-testid="nav-checklist">Pre-show</a>
+    <a href="#/post-show" class:active={route === 'post-show'}>Report</a>
     <a href="#/admin" class:active={route === 'admin'}>Admin</a>
     <a class="classic" href={route === 'channels' ? '#/foh' : '#/backstage'} class:active={route === 'backstage' || route === 'foh'} title="The previous screens (kits)">Classic</a>
   </nav>

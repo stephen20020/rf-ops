@@ -379,3 +379,61 @@ async fn hf2026_example_imports_on_a_demo_database_too() {
     assert_eq!(st, StatusCode::OK, "{v}");
     assert!(v["warnings"].as_array().unwrap().is_empty(), "{v}");
 }
+
+#[tokio::test]
+async fn preshow_checklist_ticks_itself_and_report_tells_the_story() {
+    let t = T::new().await;
+    let (_, v) = t.yaml("/api/showfile/import", SWAP_SHOW).await;
+    let show = v["show_id"].as_i64().unwrap();
+    let get = |v: &Value, k: &str| v["items"].as_array().unwrap().iter().find(|i| i["key"] == k).unwrap().clone();
+
+    let (_, c) = t.json("GET", &format!("/api/shows/{show}/checklist"), None).await;
+    assert_eq!(get(&c, "batteries")["ok"], false, "{c}");
+    assert!(get(&c, "batteries")["detail"].as_str().unwrap().contains("Not checked: Red"));
+    assert_eq!(get(&c, "handed_out")["ok"], false);
+    assert_eq!(get(&c, "plan")["ok"], true);
+    assert!(c["items"].as_array().unwrap().iter().all(|i| i["key"] != "midi"), "no MIDI in this show");
+
+    // Batteries and hand-out tick themselves.
+    for l in ["Red", "Tan", "Bpack3"] {
+        let d = dev_id(&t, show, l).await;
+        t.json("POST", &format!("/api/devices/{d}/battery"), Some(json!({ "result": "ok" }))).await;
+    }
+    t.done(show, "coming_up", "Red").await;
+    let (_, c) = t.json("GET", &format!("/api/shows/{show}/checklist"), None).await;
+    assert_eq!(get(&c, "batteries")["ok"], true, "{c}");
+    assert_eq!(get(&c, "spares")["ok"], true);
+    assert_eq!(get(&c, "handed_out")["ok"], true);
+
+    // Manual ticks, custom items; auto items can't be ticked by hand.
+    let (st, _) = t.json("POST", &format!("/api/shows/{show}/checklist/tick"), Some(json!({ "key": "wifi", "ticked": true }))).await;
+    assert_eq!(st, StatusCode::NO_CONTENT);
+    let (st, _) = t.json("POST", &format!("/api/shows/{show}/checklist/tick"), Some(json!({ "key": "batteries", "ticked": true }))).await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+    t.json("POST", &format!("/api/shows/{show}/checklist/custom"), Some(json!({ "label": "Choir mics on stands" }))).await;
+    let (_, c) = t.json("GET", &format!("/api/shows/{show}/checklist"), None).await;
+    assert_eq!(get(&c, "wifi")["ticked_by"], "Sam");
+    assert!(c["items"].to_string().contains("Choir mics on stands"));
+
+    // Run a bit of the show: a swap and a problem, then the report.
+    let (st, _) = t.json("PATCH", &format!("/api/shows/{show}"), Some(json!({ "mode": "show" }))).await;
+    assert!(st.is_success());
+    let one = t.song(show, "One").await;
+    t.go(show, one).await;
+    let red = dev_id(&t, show, "Red").await;
+    let bp = dev_id(&t, show, "Bpack3").await;
+    let (_, sw) = t.json("POST", &format!("/api/shows/{show}/swaps"), Some(json!({ "failed": red, "replacement": bp, "component": "element" }))).await;
+    t.json("POST", &format!("/api/swaps/{}/in-hand", sw["id"]), None).await;
+    t.json("POST", "/api/alerts", Some(json!({ "severity": "critical", "title": "Red (Helen): No audio", "show_id": show }))).await;
+    let (st, r) = t.json("GET", &format!("/api/shows/{show}/post-show"), None).await;
+    assert_eq!(st, StatusCode::OK, "{r}");
+    assert_eq!(r["played"][0]["song"], "One");
+    assert_eq!(r["not_played"].as_array().unwrap().len(), 2);
+    assert_eq!(r["swaps"][0]["failed"], "Red");
+    assert_eq!(r["swaps"][0]["component"], "element");
+    let steps: Vec<String> = r["swaps"][0]["timeline"].as_array().unwrap().iter().map(|s| s["step"].as_str().unwrap().to_string()).collect();
+    assert_eq!(steps, vec!["recorded", "in_hand"]);
+    assert_eq!(r["problems"][0]["title"], "Red (Helen): No audio");
+    assert_eq!(r["batteries"]["counts"]["ok"], 3);
+    assert!(r["attention"].to_string().contains("suspect"), "Red is suspect after the swap: {r}");
+}

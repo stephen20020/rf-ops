@@ -178,6 +178,34 @@ async function test(name, fn) {
     await wall.page.locator('[data-testid=tile][data-device="E-Tan"]').filter({ hasText: '✓ fresh' }).waitFor({ timeout: 1000 });
   });
 
+  await test('pre-show checklist: auto items, manual tick, start and end the show, report shows the swap', async () => {
+    const p = wall.page;
+    await p.goto(`${base}/#/checklist`);
+    const count = p.getByTestId('checklist-count');
+    await count.waitFor({ timeout: 3000 });
+    const before = Number((await count.textContent()).split('/')[0]);
+    await p.locator('[data-testid=check-item][data-key=wifi]').getByRole('button').click();
+    await count.filter({ hasText: `${before + 1} /` }).waitFor({ timeout: 2000 });
+    assert.match(await p.locator('[data-testid=check-item][data-key=batteries]').textContent(), /checked/);
+    p.once('dialog', (d) => d.accept());
+    await p.getByTestId('start-show').click();
+    await p.waitForURL(/#\/board/, { timeout: 3000 });
+    await foh.page.getByTestId('mode').filter({ hasText: 'SHOW MODE' }).waitFor({ timeout: 2000 });
+    await p.goto(`${base}/#/checklist`);
+    p.once('dialog', (d) => d.accept());
+    await p.getByTestId('end-show').click();
+    await p.waitForURL(/#\/post-show/, { timeout: 3000 });
+    const r = p.getByTestId('post-show');
+    await r.filter({ hasText: 'Swap: E-Red → E-Spare' }).waitFor({ timeout: 3000 });
+    await r.filter({ hasText: 'No audio' }).waitFor({ timeout: 1000 });
+    // Paper plot opens and shows the plan.
+    const pr = await wall.ctx.newPage();
+    await pr.goto(`${base}/#/print`);
+    await pr.locator('td', { hasText: 'Helen → Shosh' }).first().waitFor({ timeout: 3000 });
+    await pr.close();
+    await p.goto(`${base}/#/board`);
+  });
+
   await test('phone layout: jobs first, tiles below, no horizontal scroll', async () => {
     const w = await phone.page.evaluate(() => document.documentElement.scrollWidth);
     assert.ok(w <= 392, `scrollWidth ${w}`);

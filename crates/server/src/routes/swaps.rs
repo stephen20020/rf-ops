@@ -500,7 +500,7 @@ async fn undo(
 // ---------------------------------------------------------------- batteries (R5)
 
 /// When battery checks start counting for this show (UTC).
-async fn evidence_start(s: &AppState, show: Id) -> ApiResult<DateTime<Utc>> {
+pub(crate) async fn evidence_start(s: &AppState, show: Id) -> ApiResult<DateTime<Utc>> {
     type ShowTimes = (Option<String>, Option<String>, Option<String>, Option<Id>, Option<String>);
     let row: ShowTimes = sqlx::query_as(
         "SELECT s.day, s.call_time, s.activated_at, s.follows_show_id, e.timezone
@@ -527,8 +527,11 @@ async fn evidence_start(s: &AppState, show: Id) -> ApiResult<DateTime<Utc>> {
             .map(|t| t.with_timezone(&Utc)),
         None => None,
     };
-    // Without a call time or start, the last 12 hours count.
-    Ok(battery_evidence_start(call, activated, prev_end).unwrap_or_else(|| Utc::now() - chrono::Duration::hours(12)))
+    // Without a call time: checks from 6 h before the show started count (they're done before
+    // show mode), or the last 12 h if it hasn't started. The end of the previous linked show
+    // still separates afternoon checks from evening ones (R5).
+    let fallback = activated.map(|a| a - chrono::Duration::hours(6));
+    Ok(battery_evidence_start(call, fallback, prev_end).unwrap_or_else(|| Utc::now() - chrono::Duration::hours(12)))
 }
 
 /// Latest valid check per device for this show.
