@@ -58,8 +58,9 @@ ones.
 - Wired ME-1 users (Jacob perc ME 7, Blair EG2 ME 8, Joel EG3 ME 9, Matthew Garrett synth ME 11,
   Matthew Taylor B3 ME 12) are outside RF Ops. ME 13/14 are front-line/choir wedges; ME 6 is
   unassigned.
-- **Handoff:** during "I Will Follow Jesus / Lace Up Your Boots", Shosh takes Helen's RX10. Exact
-  timing and the return are unconfirmed.
+- **Handoff:** during "I Will Follow Jesus / Lace Up Your Boots", Shosh takes Helen's RX10, and
+  **hands it back to Helen afterwards** (confirmed). The exact timing within the set is still
+  unconfirmed.
 - **Pre-concert:** check pack and mic batteries, RF and audio one hour before. In RF Ops, set the
   show's call time to concert start minus one hour; battery checks are then due from that time.
 
@@ -72,9 +73,10 @@ unassigned.
 
 - Which transmitters feed Gabe's Shure, Sennheiser 1 and Sennheiser 2, and are any of them the 3
   SR IEM G4s?
-- Does Shosh hand RX10 back to Helen after "I Will Follow Jesus / Lace Up Your Boots"? The
-  template assumes yes.
 - Seth's mix, "Andrew Taylor's mix": which ME?
+- Exact point in the run order for the RX10 handoff (needs the setlist).
+
+Owner doesn't know the first and third yet. Leave them as TBC until someone on site confirms.
 
 ## Operations
 

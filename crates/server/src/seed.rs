@@ -854,7 +854,7 @@ pub async fn seed_hf2026(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
                 .execute(&mut *s.tx)
                 .await?;
             if person == "Helen" {
-                // Shosh takes Helen's RX10 for the handoff song; return afterwards is assumed (TBC).
+                // Shosh takes Helen's RX10 for the handoff song and gives it back afterwards (confirmed).
                 for (p, kit_id) in [(perf["Helen"], None), (perf["Shosh"], Some(k))] {
                     sqlx::query("INSERT INTO assignments (show_id, performer_id, kind, kit_id, song_id) VALUES (?, ?, 'iem', ?, ?)")
                         .bind(show)
