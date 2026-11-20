@@ -337,6 +337,7 @@ async fn update_show(
         show.call_time = v;
     }
     let entering_show = patch.mode.as_deref() == Some("show") && show.mode != "show";
+    let leaving_show = patch.mode.as_deref().is_some_and(|m| m != "show") && show.mode == "show";
     if let Some(v) = patch.mode {
         if !MODES.contains(&v.as_str()) {
             return Err(ApiError::bad(format!("mode must be one of {MODES:?}")));
@@ -352,7 +353,20 @@ async fn update_show(
         .execute(&mut *tx)
         .await?;
     log_event(&mut tx, &actor, "show.updated", &show).await?;
+    if leaving_show {
+        // R5: battery checks before this moment don't count for a show that follows this one.
+        sqlx::query("UPDATE shows SET ended_at = ? WHERE id = ?")
+            .bind(crate::db::now())
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+    }
     if entering_show {
+        sqlx::query("UPDATE shows SET activated_at = COALESCE(activated_at, ?) WHERE id = ?")
+            .bind(crate::db::now())
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
         // Sessions valid at this moment stay valid for the rest of the show (crate::auth).
         sqlx::query("INSERT INTO settings (key, value) VALUES ('show_mode.since', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
             .bind(crate::auth::unix_now().to_string())

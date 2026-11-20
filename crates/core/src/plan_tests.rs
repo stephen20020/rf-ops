@@ -621,3 +621,22 @@ fn battery_evidence_is_per_show_r5() {
     assert_eq!(battery_evidence_start(Some(t(18)), None, Some(t(12))), Some(t(16)));
     assert_eq!(battery_evidence_start(None, Some(t(15)), None), Some(t(15)));
 }
+
+#[test]
+fn swap_candidates_spares_first_then_free_with_retune_flag() {
+    let mut s = show();
+    s.cells.insert((TAN, Some(5)), Some(JUDAH));
+    hold(&mut s, RED, HELEN);
+    visit(&mut s, 2);
+    let c = s.swap_candidates(RED);
+    let ids: Vec<Id> = c.iter().map(|c| c.device).collect();
+    assert_eq!(ids, vec![BPACK3, TAN], "spare first, then Tan (free until song 5)");
+    assert_eq!(c[1].tier, CandidateTier::FreeUntil { song: 5, by: JUDAH });
+    // IEM: RX11 (spare on TX9) needs a retune to replace RX10 (TX10).
+    hold(&mut s, RX10, HELEN);
+    let c = s.swap_candidates(RX10);
+    assert!(c.iter().any(|c| c.device == RX11 && c.retune && c.tier == CandidateTier::Spare));
+    // Suspect or held devices are never offered.
+    s.equipment.insert(1000 + BPACK3, Usability::Suspect);
+    assert!(!s.swap_candidates(RED).iter().any(|c| c.device == BPACK3));
+}

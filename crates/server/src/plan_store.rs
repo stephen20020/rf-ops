@@ -151,6 +151,12 @@ pub async fn load(pool: &SqlitePool, show_id: Id) -> Result<(ShowState, Names), 
         }
     }
 
+    let parents: Vec<(Id, Id)> =
+        sqlx::query_as("SELECT id, parent_id FROM equipment WHERE parent_id IS NOT NULL")
+            .fetch_all(pool)
+            .await?;
+    st.base_parents = parents.into_iter().collect();
+
     let devs: Vec<DeviceRow> = sqlx::query_as(
         "SELECT id, label, kind, carrier_id, base_id, element_id, is_spare, guest_owner_id, status
          FROM devices WHERE active = 1 ORDER BY board_order, id",

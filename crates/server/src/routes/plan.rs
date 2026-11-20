@@ -102,7 +102,7 @@ async fn handoff_done(
     let before = st.holding(h.device);
     let mut tx = s.pool.begin().await?;
     plan_store::write_holdings(&mut tx, &moves, &actor.name).await?;
-    log_event(
+    let seq = log_event(
         &mut tx,
         &actor,
         "holding.changed",
@@ -116,7 +116,7 @@ async fn handoff_done(
     )
     .await?;
     tx.commit().await?;
-    Ok(Json(json!({ "done": h })))
+    Ok(Json(json!({ "done": h, "seq": seq })))
 }
 
 #[derive(Deserialize)]
@@ -171,9 +171,9 @@ async fn pass_done(
         .bind(crate::db::now())
         .execute(&mut *tx)
         .await?;
-    log_event(&mut tx, &actor, "pass.done", &json!({ "show_id": id, "pass_id": pid, "card": card })).await?;
+    let seq = log_event(&mut tx, &actor, "pass.done", &json!({ "show_id": id, "pass_id": pid, "card": card })).await?;
     tx.commit().await?;
-    Ok(Json(json!({ "done": card })))
+    Ok(Json(json!({ "done": card, "seq": seq })))
 }
 
 #[derive(Deserialize)]

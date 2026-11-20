@@ -207,6 +207,8 @@ pub struct ShowState {
     pub absent: BTreeSet<Id>,
     /// (visit, device) handoffs the A2 chose to leave for that visit.
     pub left: BTreeSet<(u32, Id)>,
+    /// Receiver channel → receiver unit (to flag "same receiver" swap candidates).
+    pub base_parents: BTreeMap<Id, Id>,
     /// R4: planned holder at the first song of the linked same-day next show, if any.
     pub next_show_first: Option<BTreeMap<Id, Option<Id>>>,
 }
@@ -918,6 +920,95 @@ impl ShowState {
             }
         }
         out
+    }
+}
+
+// ---------------------------------------------------------------- swap candidates
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "tier", rename_all = "snake_case")]
+pub enum CandidateTier {
+    /// A designated spare, free.
+    Spare,
+    /// Not used now; free until that song (it is planned for someone there).
+    FreeUntil { song: Id, by: Id },
+    /// Not used again in this show.
+    FreeRestOfShow,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Candidate {
+    pub device: Id,
+    pub tier: CandidateTier,
+    /// IEM on another TX: sync it to the failed pack's TX first (R6).
+    pub retune: bool,
+    /// Same receiver unit as the failed mic, or another kind of mic: shown, flagged.
+    pub flag: Option<String>,
+}
+
+impl ShowState {
+    /// Devices that could replace `failed` now, best first: spares, then free devices, of the
+    /// same kind, usable, not held by anyone else, not in another swap.
+    pub fn swap_candidates(&self, failed: Id) -> Vec<Candidate> {
+        let Some(f) = self.device(failed) else { return vec![] };
+        let (song, v) = match self.current_visit() {
+            Some(c) => (c.song, c.no),
+            None => match self.next_song_after(None) {
+                Some(s) => (s, 0),
+                None => return vec![],
+            },
+        };
+        let (chains, _) = self.chains(song, v);
+        let in_use = |d: Id| chains.get(&d).is_some_and(|c| !c.is_empty());
+        let busy_in_sub: BTreeSet<Id> = self
+            .subs
+            .iter()
+            .filter(|s| self.sub_applies(s, song, v) && s.state != SubState::Reversed)
+            .flat_map(|s| [s.replacement])
+            .flatten()
+            .collect();
+        let mut out = Vec::new();
+        for d in &self.devices {
+            if d.id == failed || d.kind != f.kind || in_use(d.id) || busy_in_sub.contains(&d.id) {
+                continue;
+            }
+            if d.guest_owner.is_some() || !self.usability(d.id, song, v).usable() {
+                continue;
+            }
+            // Held by someone (not yet collected) → not free.
+            if matches!(self.holding(d.id).holder, Holder::Person(_) | Holder::Owner) {
+                continue;
+            }
+            // When is it next needed?
+            let start = self.position(song).map(|p| p + 1).unwrap_or(0);
+            let next_use = self.songs.iter().skip(start).filter(|s| !s.skipped).find_map(|s| {
+                self.planned(d.id, s.id, v + 1, Some(0)).map(|p| (s.id, p))
+            });
+            let tier = if d.is_spare && next_use.is_none() {
+                CandidateTier::Spare
+            } else if let Some((s, p)) = next_use {
+                CandidateTier::FreeUntil { song: s, by: p }
+            } else {
+                CandidateTier::FreeRestOfShow
+            };
+            let retune = f.kind == Kind::Iem && d.base != f.base;
+            let flag = (f.kind == Kind::Mic && d.base.is_some() && f.base.is_some()
+                && self.base_parent(d.base) == self.base_parent(f.base))
+                .then(|| "same receiver as the failed mic".to_string());
+            out.push(Candidate { device: d.id, tier, retune, flag });
+        }
+        let rank = |c: &Candidate| match c.tier {
+            CandidateTier::Spare => 0,
+            CandidateTier::FreeRestOfShow => 1,
+            CandidateTier::FreeUntil { .. } => 2,
+        };
+        out.sort_by_key(|c| (rank(c), c.retune, c.flag.is_some(), c.device));
+        out
+    }
+
+    /// Receiver unit of a receiver channel, when known (`base_parents`).
+    fn base_parent(&self, base: Option<Id>) -> Option<Id> {
+        base.and_then(|b| self.base_parents.get(&b).copied())
     }
 }
 

@@ -97,6 +97,7 @@ impl T {
         assert!(st.is_success(), "{v}");
     }
     /// Tap Done on the first handoff for `device` (by label) in a list ("now" / "coming_up").
+    /// Returns the handoff, with the event seq (for Undo) under "seq".
     async fn done(&self, show: i64, list: &str, label: &str) -> Value {
         let b = self.board(show).await;
         let id = b["devices"].as_array().unwrap().iter().find(|d| d["label"] == label).unwrap()["id"].clone();
@@ -115,6 +116,8 @@ impl T {
             )
             .await;
         assert_eq!(st, StatusCode::OK, "{v}");
+        let mut h = h;
+        h["seq"] = v["seq"].clone();
         h
     }
 }
@@ -225,4 +228,128 @@ async fn hf2026_example_file_imports_on_the_hf_seed() {
     assert_eq!(rx3["kind"], "iem");
     // Pre-show: 12 packs to give out.
     assert_eq!(b["board"]["coming_up"].as_array().unwrap().len(), 12, "{}", b["board"]["coming_up"]);
+}
+
+const SWAP_SHOW: &str = r#"
+show: Swap test
+people: [Helen, Judah, Shosh]
+devices:
+  - { label: Red, kind: mic, channel: "34" }
+  - { label: Bpack3, kind: mic, channel: "43", spare: true }
+  - { label: Tan, kind: mic, channel: "35" }
+songs:
+  - { title: One }
+  - { title: Two }
+  - { title: Three }
+plot:
+  default:
+    Red: Helen
+  Three:
+    Tan: Judah
+"#;
+
+async fn dev_id(t: &T, show: i64, label: &str) -> i64 {
+    let b = t.board(show).await;
+    b["devices"].as_array().unwrap().iter().find(|d| d["label"] == label).unwrap()["id"].as_i64().unwrap()
+}
+
+#[tokio::test]
+async fn swap_until_fixed_full_flow_and_return() {
+    let t = T::new().await;
+    let (_, v) = t.yaml("/api/showfile/import", SWAP_SHOW).await;
+    let show = v["show_id"].as_i64().unwrap();
+    t.done(show, "coming_up", "Red").await;
+    let one = t.song(show, "One").await;
+    t.go(show, one).await;
+    let red = dev_id(&t, show, "Red").await;
+    let bp = dev_id(&t, show, "Bpack3").await;
+
+    // Candidates: the spare first.
+    let (_, c) = t.json("GET", &format!("/api/shows/{show}/devices/{red}/candidates"), None).await;
+    assert_eq!(c["candidates"][0]["label"], "Bpack3", "{c}");
+    assert_eq!(c["candidates"][0]["tier"]["tier"], "spare");
+
+    // Swap (R1 default until fixed): recorded → both devices off the handoff lists.
+    let (st, sw) = t.json("POST", &format!("/api/shows/{show}/swaps"), Some(json!({ "failed": red, "replacement": bp }))).await;
+    assert_eq!(st, StatusCode::CREATED, "{sw}");
+    let sid = sw["id"].as_i64().unwrap();
+    let b = t.board(show).await;
+    assert!(b["board"]["held_by_swap"].as_array().unwrap().len() == 2);
+    // FOH can't confirm before In hand.
+    let (st, _) = t.json("POST", &format!("/api/swaps/{sid}/foh-done"), None).await;
+    assert_eq!(st, StatusCode::CONFLICT);
+    let (st, _) = t.json("POST", &format!("/api/swaps/{sid}/in-hand"), None).await;
+    assert_eq!(st, StatusCode::OK);
+    let b = t.board(show).await;
+    let tile = |label: &str| b["devices"].as_array().unwrap().iter().find(|d| d["label"] == label).unwrap().clone();
+    assert_eq!(tile("Bpack3")["usage"]["usage"], "on_spare_for");
+    assert_eq!(tile("Red")["usage"]["usage"], "suspect");
+    assert!(b["board"]["now"].as_array().unwrap().is_empty(), "{}", b["board"]["now"]);
+    let (st, _) = t.json("POST", &format!("/api/swaps/{sid}/foh-done"), None).await;
+    assert_eq!(st, StatusCode::OK);
+    let (_, list) = t.json("GET", &format!("/api/shows/{show}/swaps"), None).await;
+    assert_eq!(list[0]["state"], "foh_confirmed");
+    assert_eq!(list[0]["failed_channel"], "34");
+    assert_eq!(list[0]["replacement_channel"], "43");
+
+    // Next song: Helen stays on the spare (until fixed).
+    let two = t.song(show, "Two").await;
+    t.go(show, two).await;
+    let b = t.board(show).await;
+    assert!(b["board"]["now"].as_array().unwrap().is_empty());
+
+    // Red is fixed → Return (two steps) → Red back to Helen, Bpack3 to stock.
+    let (st, _) = t.json("POST", &format!("/api/swaps/{sid}/return"), None).await;
+    assert_eq!(st, StatusCode::OK);
+    let (st, _) = t.json("POST", &format!("/api/swaps/{sid}/return-in-hand"), None).await;
+    assert_eq!(st, StatusCode::OK);
+    let b = t.board(show).await;
+    let tile = |label: &str| b["devices"].as_array().unwrap().iter().find(|d| d["label"] == label).unwrap().clone();
+    assert_eq!(tile("Red")["usage"]["usage"], "in_use");
+    assert_eq!(tile("Bpack3")["usage"]["usage"], "spare");
+    assert!(b["board"]["now"].as_array().unwrap().is_empty(), "{}", b["board"]["now"]);
+}
+
+#[tokio::test]
+async fn undo_battery_plot_edit_pull_and_count_in() {
+    let t = T::new().await;
+    let (_, v) = t.yaml("/api/showfile/import", SWAP_SHOW).await;
+    let show = v["show_id"].as_i64().unwrap();
+    let red = dev_id(&t, show, "Red").await;
+    let tan = dev_id(&t, show, "Tan").await;
+
+    // Done, then Undo within 10 s.
+    let h = t.done(show, "coming_up", "Red").await;
+    let (st, v) = t.json("POST", &format!("/api/shows/{show}/undo"), Some(json!({ "seq": h["seq"] }))).await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    let b = t.board(show).await;
+    assert!(b["board"]["coming_up"].to_string().contains("give"), "back to needing a give");
+
+    // Battery check counts for this show.
+    let (st, _) = t.json("POST", &format!("/api/devices/{red}/battery"), Some(json!({ "result": "fresh" }))).await;
+    assert_eq!(st, StatusCode::NO_CONTENT);
+    let (_, bat) = t.json("GET", &format!("/api/shows/{show}/batteries"), None).await;
+    assert_eq!(bat["devices"][red.to_string()]["result"], "fresh");
+
+    // Plot edit from any screen (R7): Tan to Shosh by default.
+    let (_, snap) = t.json("GET", "/api/snapshot", None).await;
+    let shosh = snap["performers"].as_array().unwrap().iter().find(|p| p["name"] == "Shosh").unwrap()["id"].clone();
+    let (st, _) = t.json("PUT", &format!("/api/shows/{show}/plot"), Some(json!({ "device": tan, "song": null, "performer": shosh }))).await;
+    assert_eq!(st, StatusCode::NO_CONTENT);
+    let b = t.board(show).await;
+    assert!(b["board"]["coming_up"].as_array().unwrap().iter().any(|h| h["device"] == tan));
+
+    // Pull mid-song: no instant collect; collected at the next song.
+    t.done(show, "coming_up", "Red").await;
+    let one = t.song(show, "One").await;
+    t.go(show, one).await;
+    let (st, p) = t.json("POST", &format!("/api/shows/{show}/swaps"), Some(json!({ "kind": "pull", "failed": red }))).await;
+    assert_eq!(st, StatusCode::CREATED, "{p}");
+    let b = t.board(show).await;
+    assert!(!b["board"]["now"].as_array().unwrap().iter().any(|h| h["device"] == red));
+
+    // Count-in close marks anything still out as missing.
+    let (st, v) = t.json("POST", &format!("/api/shows/{show}/count-in/close"), None).await;
+    assert_eq!(st, StatusCode::OK);
+    assert!(v["missing"].to_string().contains("Red"), "{v}");
 }
