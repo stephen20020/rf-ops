@@ -15,20 +15,23 @@ Living document. Confirmed facts come from the owner; everything else is marked 
 | Playback | MultiTracks Playback on a **MacBook** (macOS version TBD), **iConnectivity PlayAUDIO1U** | `rfops-bridge` on the Mac: virtual "RF Ops" MIDI port → server. Default cues: Program Change per song on ch 16, follow automatically. **Needs a real test with Playback.** |
 | Network | Dante and control on the **same network** | — |
 
+## Source precedence
+
+**The Homestead Fair afternoon IEM & ME-1 sheet is authoritative.** Where it disagrees with the
+dLive system plan (Nov 3, 2026), the sheet wins. Newer documents from the owner override older
+ones.
+
 ## Console system (from the HF 2026 dLive system plan, Nov 2026)
 
 - Rig: S7000 surface, DM64 MixRack, 4× DX168 (DX 1/2 band station, DX 3/4 orchestra pit).
 - **Wireless mics: 12 channels on console Ch 33–44, DM64 inputs 53–64.** Vocal mic IDs are
   colours: Yellow, Red, Blue, Green, Black, White, Orange, Tan (handhelds), then Bpack1–4. They are
   fader bank 1 on Layer A in that order. Direct outs to ME channels 23–34.
-- **IEM: transmitters stay fixed all day; only the people change.**
-  - TX1 ← ME-1 1 (drums), TX2 ← ME-1 2 (bass), TX4 ← ME-1 4 (Nord), TX10 ← ME-1 10 (acoustic).
-  - TX7–TX9 ← St Aux 7–9 (Choir Director, Orchestra Director, Chandler Moore), on DM64 outs 13–18.
-  - TX3, TX5 and TX6 are unused.
-  - **RX1, RX3 and RX6 all listen to TX1**; every other pack matches its TX number.
-  - One IEM transmitter feeding several packs is normal, so RF Ops does not treat it as a conflict.
-    A pack or a mic receiver channel on two people still is.
-- ME-1 6 feeds Andrew's own IEM in the evening (not in RF Ops inventory).
+- **IEM:** superseded by the afternoon sheet below. The plan's TX/ME mapping (TX5 unused, TX8 on
+  St Aux 8, TX10 on ME-1 10, ME-1 6 for Andrew's IEM) does **not** apply. What still holds from the
+  plan: RX1, RX3 and RX6 all listen to TX1, and one IEM transmitter feeding several packs is
+  normal, so RF Ops doesn't treat it as a conflict. A pack or a mic receiver channel on two people
+  still is.
 - Playback on Ch 109–116 (PB Click, PB Guide, Tracks, BGV, Keys/Pad), moving to Dante. PB Guide
   plus talkback go to ME-1 via the Comms aux.
 - There are two sets (afternoon/evening) with a changeover. The run order isn't set yet.
@@ -65,18 +68,13 @@ Template: `rfops-server --seed-hf2026` on an empty database loads "HF Afternoon 
 segments around the handoff song until the run order is set. The 12 colour mics are on Ch 33–44,
 unassigned.
 
-### Afternoon sheet vs. system plan (to resolve)
+### Still open from the afternoon sheet
 
-1. **TX5/RX5:** the plan says TX5 and ME-1 5 are unused; the sheet has Judah on RX5, ME 5.
-2. **RX10:** the plan says TX10 ← ME-1 10 (acoustic); the sheet has Helen on RX10 with ME 3, and
-   David (acoustic) on Gabe's Shure with ME 10.
-3. **RX8:** the plan says TX8 ← St Aux 8 (orchestra director console mix); the sheet has Sam on
-   ME 16.
-4. **ME 6:** the plan says ME-1 6 feeds Andrew's own IEM in the evening; in the afternoon it is
-   unassigned, and Seth is on "Andrew Taylor's mix (ME unconfirmed)".
-5. Which transmitters feed Gabe's Shure, Sennheiser 1 and Sennheiser 2, and are any of these the
-   3 SR IEM G4s?
-6. Does Shosh hand RX10 back to Helen after the song?
+- Which transmitters feed Gabe's Shure, Sennheiser 1 and Sennheiser 2, and are any of them the 3
+  SR IEM G4s?
+- Does Shosh hand RX10 back to Helen after "I Will Follow Jesus / Lace Up Your Boots"? The
+  template assumes yes.
+- Seth's mix, "Andrew Taylor's mix": which ME?
 
 ## Operations
 
@@ -91,9 +89,8 @@ unassigned.
 ## Open questions
 
 - [ ] Which IEM transmitters/packs are XSW and which are SR IEM G4 (3 G4 have Ethernet).
-- [ ] Who wears RX3 and RX6 (both on the TX1 drum mix)?
-- [ ] TX7–TX9: the plan has them as director/Chandler mixes, and also as console mixes for
-      Stephen, Sam and Chandler in the afternoon. Who wears which pack in each set?
+- [x] RX3 and RX6: Drummer 2 and Drummer 3 (afternoon sheet).
+- [x] TX7–TX9 (afternoon): Stephen RX7 console mix, Sam RX8 ME 16, Chandler RX9 console mix (Saturday).
 - [ ] Capsules on the colour handhelds and headsets/lavs on Bpack1–4.
 - [ ] Spare mics: all 12 ULX-D channels are in use. Is there a spare handheld or receiver channel?
 - [ ] Which guitarists use the GLXD6/GLXD6+ (the plan wires EG1–3 to the band box and DM64 DIs)?

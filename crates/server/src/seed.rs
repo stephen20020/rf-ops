@@ -810,7 +810,7 @@ pub async fn seed_hf2026(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
                 "RX7 · console",
                 Some("TX7"),
                 "RX7",
-                "Console mix (St Aux 7)",
+                "Console mix",
             ),
             ("Sam", "RX8 · ME 16", Some("TX8"), "RX8", "ME 16"),
             ("Helen", "RX10 · ME 3", Some("TX10"), "RX10", "ME 3"),
@@ -835,7 +835,7 @@ pub async fn seed_hf2026(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
                 "RX9 · console",
                 Some("TX9"),
                 "RX9",
-                "Console mix (St Aux 9)",
+                "Console mix",
             )),
             _ => iem.push((
                 "Josh Patterson",
