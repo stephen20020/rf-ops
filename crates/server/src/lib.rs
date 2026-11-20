@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod backup;
 pub mod db;
 pub mod error;
@@ -18,6 +19,15 @@ use sqlx::SqlitePool;
 use tower_http::services::{ServeDir, ServeFile};
 
 pub use db::Actor;
+
+/// Create the first Lead or reset a Lead's PIN (env `RFOPS_ADMIN_*` or `--create-admin`).
+pub async fn upsert_admin(pool: &SqlitePool, name: &str, pin: &str) -> Result<i64, String> {
+    routes::auth::upsert_admin(pool, name, pin).await
+}
+
+pub async fn admin_exists(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
+    routes::auth::admin_exists(pool).await
+}
 use error::ApiError;
 use hub::Hub;
 
@@ -37,6 +47,7 @@ pub struct AppState {
     pub presence: hub::Presence,
     /// Set when startup had to recover the database; shown on the health page.
     pub startup_note: Option<String>,
+    pub auth: Arc<auth::AuthConfig>,
 }
 
 impl AppState {
@@ -57,6 +68,10 @@ impl AppState {
             hub.clone(),
         ));
         let epoch = ensure_epoch(&pool).await?;
+        let key = auth::load_key(&pool).await?;
+        let origin = std::env::var("RFOPS_PUBLIC_ORIGIN")
+            .ok()
+            .filter(|o| !o.is_empty());
         tokio::spawn(housekeeping(pool.clone()));
         Ok(Self {
             pool,
@@ -69,7 +84,20 @@ impl AppState {
             epoch,
             presence: hub::Presence::default(),
             startup_note: None,
+            auth: Arc::new(auth::AuthConfig::new(key, origin)),
         })
+    }
+
+    /// TESTS ONLY: take identity from the legacy `x-rfops-actor` header with no session, as
+    /// before step 1b. The server binary never calls this; `tests/security.rs` checks the
+    /// default rejects header identity.
+    #[doc(hidden)]
+    pub async fn insecure_header_auth_for_tests(mut self) -> Self {
+        let key = auth::load_key(&self.pool).await.expect("session key");
+        let mut cfg = auth::AuthConfig::new(key, None);
+        cfg.header_auth = true;
+        self.auth = Arc::new(cfg);
+        self
     }
 
     /// Enable verified backups to `dir`: every `show_every` while a show is in show mode, every
@@ -146,6 +174,14 @@ async fn housekeeping(pool: SqlitePool) {
             .bind(&day_ago)
             .execute(&pool)
             .await;
+        let _ = sqlx::query("DELETE FROM session_revocations WHERE expires_at < ?")
+            .bind(auth::unix_now())
+            .execute(&pool)
+            .await;
+        let _ = sqlx::query("DELETE FROM join_codes WHERE expires_at < ? OR uses_left <= 0")
+            .bind(auth::unix_now())
+            .execute(&pool)
+            .await;
         if let Err(e) = db::quick_check(&pool).await {
             tracing::error!(problem = %e, "hourly integrity check FAILED; restore from backup after the show");
         }
@@ -166,18 +202,28 @@ pub fn app_with_web(state: AppState, web_dir: Option<PathBuf>) -> Router {
         .layer(middleware::from_fn_with_state(
             state.clone(),
             hub::notify_on_write,
+        ))
+        // Outermost on the API: unauthenticated requests never reach the idempotency store.
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_session,
         ));
     if let Some(dir) = web_dir {
+        // The app shell (code only, no show data) is public so the sign-in screen can load.
         let index = dir.join("index.html");
         router = router.fallback_service(ServeDir::new(dir).fallback(ServeFile::new(index)));
     }
-    router.with_state(state)
+    router
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::security_headers,
+        ))
+        .with_state(state)
 }
 
 pub const ACTOR_HEADER: &str = "x-rfops-actor";
 pub const CLIENT_HEADER: &str = "x-rfops-client";
 pub const IDEMPOTENCY_HEADER: &str = "x-rfops-idempotency-key";
-pub const TOKEN_HEADER: &str = "x-rfops-token";
 
 impl FromRequestParts<AppState> for Actor {
     type Rejection = ApiError;
@@ -195,38 +241,57 @@ impl FromRequestParts<AppState> for Actor {
                 .filter(|s| !s.is_empty())
                 .map(str::to_owned)
         };
+        if !state.auth.header_auth {
+            let p = parts
+                .extensions
+                .get::<auth::Principal>()
+                .cloned()
+                .ok_or_else(|| ApiError::Unauthorized("sign in required".into()))?;
+            if p.role == "viewer" {
+                return Err(ApiError::Forbidden("viewers cannot make changes".into()));
+            }
+            if p.kind == auth::Kind::User && !p.has_pin && p.role != "helper" {
+                return Err(ApiError::Forbidden(
+                    "set a PIN before making changes; ask the Lead".into(),
+                ));
+            }
+            let name = match (p.kind, header(auth::ON_BEHALF_HEADER)) {
+                // "Wall (Sam)": only names of real operators are accepted.
+                (auth::Kind::Screen, Some(who)) => {
+                    let known: Option<String> =
+                        sqlx::query_scalar("SELECT name FROM users WHERE name = ?")
+                            .bind(&who)
+                            .fetch_optional(&state.pool)
+                            .await?;
+                    match known {
+                        Some(n) => format!("{} ({n})", p.name),
+                        None => p.name.clone(),
+                    }
+                }
+                _ => p.name.clone(),
+            };
+            return Ok(Actor {
+                name,
+                client_id: header(CLIENT_HEADER),
+                role: Some(p.role),
+            });
+        }
+
+        // Legacy header identity (tests only, see `insecure_header_auth_for_tests`).
         let name = header(ACTOR_HEADER)
             .ok_or_else(|| ApiError::bad(format!("missing {ACTOR_HEADER} header")))?;
-
-        // Bootstrap mode: until the first user exists, any name may act (as admin).
         let any_users: Option<i64> = sqlx::query_scalar("SELECT id FROM users LIMIT 1")
             .fetch_optional(&state.pool)
             .await?;
         let role = if any_users.is_some() {
-            let row: Option<(i64, String, bool)> =
-                sqlx::query_as("SELECT id, role, pin_hash IS NOT NULL FROM users WHERE name = ?")
-                    .bind(&name)
-                    .fetch_optional(&state.pool)
-                    .await?;
-            let (user_id, role, has_pin) =
+            let row: Option<(String,)> = sqlx::query_as("SELECT role FROM users WHERE name = ?")
+                .bind(&name)
+                .fetch_optional(&state.pool)
+                .await?;
+            let (role,) =
                 row.ok_or_else(|| ApiError::Forbidden(format!("unknown operator '{name}'")))?;
             if role == "viewer" {
                 return Err(ApiError::Forbidden("viewers cannot make changes".into()));
-            }
-            if has_pin {
-                let token = header(TOKEN_HEADER).unwrap_or_default();
-                let ok: Option<i64> = sqlx::query_scalar(
-                    "SELECT user_id FROM sessions WHERE token = ? AND user_id = ?",
-                )
-                .bind(&token)
-                .bind(user_id)
-                .fetch_optional(&state.pool)
-                .await?;
-                if ok.is_none() {
-                    return Err(ApiError::Unauthorized(format!(
-                        "PIN sign-in required for {name}"
-                    )));
-                }
             }
             Some(role)
         } else {

@@ -16,7 +16,7 @@ impl T {
     async fn new() -> Self {
         let pool = db::connect("sqlite::memory:").await.unwrap();
         T {
-            app: app(AppState::new(pool).await.unwrap()),
+            app: app(AppState::new(pool).await.unwrap().insecure_header_auth_for_tests().await),
         }
     }
 

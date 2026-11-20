@@ -23,7 +23,7 @@ impl T {
     async fn demo() -> Self {
         let pool = db::connect("sqlite::memory:").await.unwrap();
         seed::seed_demo(&pool).await.unwrap();
-        let state = AppState::new(pool.clone()).await.unwrap();
+        let state = AppState::new(pool.clone()).await.unwrap().insecure_header_auth_for_tests().await;
         let key = midi::ensure_key(&pool).await.unwrap();
         T {
             app: app(state.clone()),

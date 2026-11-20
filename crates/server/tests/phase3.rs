@@ -15,14 +15,13 @@ struct T {
     app: Router,
     pool: sqlx::SqlitePool,
     actor: String,
-    token: Option<String>,
 }
 
 impl T {
     async fn demo() -> Self {
         let pool = db::connect("sqlite::memory:").await.unwrap();
         seed::seed_demo(&pool).await.unwrap();
-        Self::with_state(AppState::new(pool.clone()).await.unwrap(), pool)
+        Self::with_state(AppState::new(pool.clone()).await.unwrap().insecure_header_auth_for_tests().await, pool)
     }
 
     fn with_state(state: AppState, pool: sqlx::SqlitePool) -> Self {
@@ -30,7 +29,6 @@ impl T {
             app: app(state),
             pool,
             actor: "Admin".into(),
-            token: None,
         }
     }
 
@@ -41,13 +39,10 @@ impl T {
         body: Option<String>,
         ctype: &str,
     ) -> (StatusCode, Value, String) {
-        let mut b = Request::builder()
+        let b = Request::builder()
             .method(method)
             .uri(uri)
             .header("x-rfops-actor", &self.actor);
-        if let Some(t) = &self.token {
-            b = b.header("x-rfops-token", t);
-        }
         let req = match body {
             Some(v) => b.header("content-type", ctype).body(Body::from(v)),
             None => b.body(Body::empty()),
@@ -247,7 +242,7 @@ async fn swap_rejects_spare_in_use_and_song_scope_is_one_song() {
 }
 
 #[tokio::test]
-async fn pin_sign_in_is_required_once_set() {
+async fn pin_permissions_and_hash_never_leaves_server() {
     let mut t = T::demo().await;
     let admin = t.id_of("users", "name", "Admin").await;
     let left = t.id_of("users", "name", "A2 Stage Left").await;
@@ -280,45 +275,7 @@ async fn pin_sign_in_is_required_once_set() {
         .await;
     assert_eq!(v["has_pin"], true);
 
-    let alert = json!({ "severity": "info", "title": "x" });
-    let (st, _) = t.req("POST", "/api/alerts", Some(alert.clone())).await;
-    assert_eq!(st, StatusCode::UNAUTHORIZED, "PIN set, no token");
-
-    let (st, _) = t
-        .req(
-            "POST",
-            "/api/login",
-            Some(json!({ "name": "A2 Stage Left", "pin": "0000" })),
-        )
-        .await;
-    assert_eq!(st, StatusCode::UNAUTHORIZED);
-    let login = t
-        .ok(
-            "POST",
-            "/api/login",
-            Some(json!({ "name": "A2 Stage Left", "pin": "4821" })),
-        )
-        .await;
-    t.token = Some(login["token"].as_str().unwrap().to_string());
-    t.ok("POST", "/api/alerts", Some(alert.clone())).await;
-
-    // A token for one operator does not work for another with a PIN.
-    t.actor = "Admin".into();
-    t.ok(
-        "PUT",
-        &format!("/api/users/{admin}/pin"),
-        Some(json!({ "pin": "9999" })),
-    )
-    .await;
-    let (st, _) = t.req("POST", "/api/alerts", Some(alert.clone())).await;
-    assert_eq!(st, StatusCode::UNAUTHORIZED);
-
-    // Logout invalidates.
-    t.actor = "A2 Stage Left".into();
-    t.ok("POST", "/api/logout", None).await;
-    let (st, _) = t.req("POST", "/api/alerts", Some(alert)).await;
-    assert_eq!(st, StatusCode::UNAUTHORIZED);
-
+    // Sign-in with the PIN (cookies, lockouts, join codes) is covered in tests/security.rs.
     let snap = t.snapshot().await;
     let users = snap["users"].as_array().unwrap();
     assert!(users
@@ -645,7 +602,7 @@ async fn backups_and_report() {
         .unwrap();
     seed::seed_demo(&pool).await.unwrap();
     let backups = dir.join("backups");
-    let state = AppState::new(pool.clone()).await.unwrap().with_backups(
+    let state = AppState::new(pool.clone()).await.unwrap().insecure_header_auth_for_tests().await.with_backups(
         backups.clone(),
         std::time::Duration::from_secs(3600),
         std::time::Duration::from_secs(3600),

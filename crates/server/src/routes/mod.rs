@@ -1,4 +1,4 @@
-mod auth;
+pub(crate) mod auth;
 mod data;
 pub(crate) mod inventory;
 mod live;
@@ -47,7 +47,12 @@ fn age_secs(iso: &Option<String>) -> Option<i64> {
 }
 
 /// Detailed health for operators (reliability req 26).
-async fn health_detail(State(s): State<AppState>, _actor: Actor) -> ApiResult<Json<Value>> {
+async fn health_detail(State(s): State<AppState>, actor: Actor) -> ApiResult<Json<Value>> {
+    if !actor.is_admin() {
+        return Err(crate::error::ApiError::Forbidden(
+            "health detail is for the Lead".into(),
+        ));
+    }
     let integrity = db::quick_check(&s.pool).await;
     let db_path: Option<String> =
         sqlx::query_scalar("SELECT file FROM pragma_database_list WHERE name = 'main'")

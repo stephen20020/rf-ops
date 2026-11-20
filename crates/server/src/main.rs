@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, path::PathBuf, time::Duration};
 
-use rfops_server::{app_with_web, backup, db, seed, AppState};
+use rfops_server::{admin_exists, app_with_web, backup, db, seed, upsert_admin, AppState};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -48,6 +48,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     if let Some(n) = &startup_note {
         tracing::warn!(note = %n, "database recovered at startup");
+    }
+    // `rfops-server --create-admin "Name" 123456`: create or reset a Lead, then exit.
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == "--create-admin") {
+        let (Some(name), Some(pin)) = (args.get(i + 1), args.get(i + 2)) else {
+            return Err("usage: rfops-server --create-admin <name> <pin>".into());
+        };
+        upsert_admin(&pool, name, pin).await?;
+        println!("Lead '{name}' can now sign in with that PIN.");
+        return Ok(());
+    }
+    // First start: the Lead comes from RFOPS_ADMIN_NAME / RFOPS_ADMIN_PIN. There is no
+    // "anyone can act" mode.
+    if !admin_exists(&pool).await? {
+        match (std::env::var("RFOPS_ADMIN_NAME"), std::env::var("RFOPS_ADMIN_PIN")) {
+            (Ok(name), Ok(pin)) => {
+                upsert_admin(&pool, &name, &pin).await?;
+                tracing::info!(%name, "first Lead created from RFOPS_ADMIN_NAME / RFOPS_ADMIN_PIN");
+            }
+            _ => tracing::warn!(
+                "no Lead with a PIN exists: nobody can sign in. Set RFOPS_ADMIN_NAME and RFOPS_ADMIN_PIN, or run `rfops-server --create-admin <name> <pin>`"
+            ),
+        }
     }
     if seed_demo && seed::seed_demo(&pool).await? {
         tracing::info!("demo data inserted");

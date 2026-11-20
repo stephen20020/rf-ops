@@ -254,9 +254,20 @@ pub struct WsQuery {
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     State(s): State<AppState>,
-    Query(q): Query<WsQuery>,
+    principal: Option<axum::Extension<crate::auth::Principal>>,
+    headers: axum::http::HeaderMap,
+    Query(mut q): Query<WsQuery>,
 ) -> Response {
-    ws.on_upgrade(move |socket| client(socket, s, q))
+    // Signed in: presence shows the real name, not what the client claims.
+    let recheck = if s.auth.header_auth {
+        None
+    } else {
+        if let Some(axum::Extension(p)) = &principal {
+            q.operator = Some(p.name.clone());
+        }
+        Some(headers)
+    };
+    ws.on_upgrade(move |socket| client(socket, s, q, recheck))
 }
 
 #[derive(Serialize)]
@@ -287,7 +298,12 @@ async fn send(socket: &mut WebSocket, msg: &Outgoing<'_>) -> bool {
     socket.send(Message::Text(text.into())).await.is_ok()
 }
 
-async fn client(mut socket: WebSocket, s: AppState, q: WsQuery) {
+async fn client(
+    mut socket: WebSocket,
+    s: AppState,
+    q: WsQuery,
+    recheck: Option<axum::http::HeaderMap>,
+) {
     let client_id = q
         .client
         .clone()
@@ -297,11 +313,19 @@ async fn client(mut socket: WebSocket, s: AppState, q: WsQuery) {
         q.operator.as_deref().unwrap_or("?"),
         q.screen.as_deref().unwrap_or("?"),
     );
-    client_loop(&mut socket, &s, q.after, &client_id).await;
+    client_loop(&mut socket, &s, q.after, &client_id, recheck.as_ref()).await;
     s.presence.remove(&client_id);
 }
 
-async fn client_loop(socket: &mut WebSocket, s: &AppState, after: Option<i64>, client_id: &str) {
+/// With `recheck`, the session in those headers is re-validated on every tick, so signing out,
+/// revoking a screen or changing a PIN closes open sockets within 10 s.
+async fn client_loop(
+    socket: &mut WebSocket,
+    s: &AppState,
+    after: Option<i64>,
+    client_id: &str,
+    recheck: Option<&axum::http::HeaderMap>,
+) {
     // Subscribe before reading the log so nothing falls between replay and live events.
     let mut rx = s.hub.subscribe();
     let Ok(head) = max_seq(&s.pool).await else {
@@ -371,6 +395,13 @@ async fn client_loop(socket: &mut WebSocket, s: &AppState, after: Option<i64>, c
                     tracing::info!(client = client_id, "closing silent connection");
                     let _ = socket.send(Message::Close(None)).await;
                     return;
+                }
+                if let Some(h) = recheck {
+                    if crate::auth::authenticate(s, h).await.is_err() {
+                        tracing::info!(client = client_id, "session ended; closing socket");
+                        let _ = socket.send(Message::Close(None)).await;
+                        return;
+                    }
                 }
                 let msg = Outgoing::Tick { seq: last, server_time: now(), epoch: s.epoch };
                 if !send(socket, &msg).await { return; }

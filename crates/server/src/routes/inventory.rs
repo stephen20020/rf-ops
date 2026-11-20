@@ -277,9 +277,12 @@ pub(crate) const USER_COLUMNS: &str = "id, name, role, pin_hash IS NOT NULL AS h
 pub struct NewUser {
     pub name: String,
     pub role: Option<String>,
+    /// Optional PIN set at creation (4–8 digits). Everyone except helpers needs one to sign in.
+    #[serde(default)]
+    pub pin: Option<String>,
 }
 
-pub(crate) const ROLES: [&str; 4] = ["admin", "a2", "foh", "viewer"];
+pub(crate) const ROLES: [&str; 5] = ["admin", "a2", "foh", "helper", "viewer"];
 
 async fn list_users(State(s): State<AppState>) -> ApiResult<Json<Vec<User>>> {
     Ok(Json(
@@ -304,10 +307,16 @@ async fn create_user(
     if n.name.trim().is_empty() {
         return Err(ApiError::bad("name is required"));
     }
+    if let Some(p) = &n.pin {
+        if !crate::routes::auth::valid_pin(p) {
+            return Err(ApiError::bad("PIN must be 4–8 digits"));
+        }
+    }
     let mut tx = s.pool.begin().await?;
-    let id = sqlx::query("INSERT INTO users (name, role) VALUES (?, ?)")
+    let id = sqlx::query("INSERT INTO users (name, role, pin_hash) VALUES (?, ?, ?)")
         .bind(n.name.trim())
         .bind(&role)
+        .bind(n.pin.as_deref().map(crate::routes::auth::hash_pin))
         .execute(&mut *tx)
         .await?
         .last_insert_rowid();
@@ -315,7 +324,7 @@ async fn create_user(
         id,
         name: n.name.trim().into(),
         role,
-        has_pin: false,
+        has_pin: n.pin.is_some(),
     };
     log_event(&mut tx, &actor, "user.created", &user).await?;
     tx.commit().await?;

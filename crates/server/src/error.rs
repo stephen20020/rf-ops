@@ -17,6 +17,8 @@ pub enum ApiError {
     Forbidden(String),
     #[error("{0}")]
     Unauthorized(String),
+    #[error("{0}")]
+    TooMany(String),
     #[error(transparent)]
     Db(#[from] sqlx::Error),
 }
@@ -35,6 +37,7 @@ impl IntoResponse for ApiError {
             ApiError::Conflict(m) => (StatusCode::CONFLICT, m.clone()),
             ApiError::Forbidden(m) => (StatusCode::FORBIDDEN, m.clone()),
             ApiError::Unauthorized(m) => (StatusCode::UNAUTHORIZED, m.clone()),
+            ApiError::TooMany(m) => (StatusCode::TOO_MANY_REQUESTS, m.clone()),
             ApiError::Db(sqlx::Error::RowNotFound) => (StatusCode::NOT_FOUND, "not found".into()),
             ApiError::Db(e) => {
                 if let Some(db) = e.as_database_error() {

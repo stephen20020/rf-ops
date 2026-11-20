@@ -19,6 +19,10 @@ rand = "0.8"
 csv = "1"
 fs4 = "1.1"
 futures-util = "0.3"
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+hex = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 

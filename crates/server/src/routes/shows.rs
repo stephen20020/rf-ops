@@ -352,6 +352,13 @@ async fn update_show(
         .execute(&mut *tx)
         .await?;
     log_event(&mut tx, &actor, "show.updated", &show).await?;
+    if entering_show {
+        // Sessions valid at this moment stay valid for the rest of the show (crate::auth).
+        sqlx::query("INSERT INTO settings (key, value) VALUES ('show_mode.since', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+            .bind(crate::auth::unix_now().to_string())
+            .execute(&mut *tx)
+            .await?;
+    }
     tx.commit().await?;
     if entering_show {
         // Snapshot the database before the show and check batteries straight away.
