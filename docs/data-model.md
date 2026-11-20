@@ -6,6 +6,19 @@ usage are worked out.
 - **v3.1** resolves the third review's blockers B1–B8 and its decisions.
 - Both are logged in `docs/interface-spec.md` §23–24.
 
+## 0. Owner decisions on the core rules (Nov 2026; these win over anything below)
+
+| # | Question | Decision |
+|---|---|---|
+| R1 | Default swap length | **Until fixed**: the performer stays on the spare for later songs until the original is marked fixed and swapped back |
+| R2 | Failed device planned for someone else later | **Warn one song ahead**: "Red is broken but planned for Judah at Song 6", with [Give Judah the same spare] [Pick another] [Red is fixed] |
+| R3 | Going back to an earlier song | **Redo that song**: show the moves to match its plan again, including its mid-song passes. No confirmation |
+| R4 | Same performer, same device, afternoon → evening | **Keep it with them**: "Keep RX10 with Helen for evening". Everything else is collected |
+| R5 | Battery checks | **Before every show**: an earlier set's checks don't count |
+| R6 | Failed IEM pack, spare on another TX | **Re-sync the spare to the failed pack's TX**, so the mix is unchanged. The swap card says "Sync RX9 to TX1 first" |
+| R7 | Plan edits during the show | **Anyone, from any screen.** Every change is announced with who made it and can be undone. No show-mode lock on the plan |
+| R8 | Handoff Done | **One tap, 10-second Undo**, no second confirmation |
+
 ## 1. Core idea
 
 **Devices** (Red, Bpack2, RX10, GLX 1) are permanent and shared by every show. Each show has a
