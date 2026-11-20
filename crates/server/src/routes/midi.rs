@@ -37,8 +37,7 @@ async fn check_key(s: &AppState, headers: &HeaderMap) -> ApiResult<()> {
         .get(BRIDGE_KEY_HEADER)
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default();
-    let key = midi::ensure_key(&s.pool).await?;
-    if given.is_empty() || given != key {
+    if !midi::key_matches(&s.pool, given).await? {
         return Err(ApiError::Unauthorized("wrong or missing bridge key".into()));
     }
     Ok(())
@@ -197,14 +196,15 @@ async fn update_settings(
     Ok(Json(current_status(&s, false).await?))
 }
 
+/// Whether a bridge key exists. The key itself is never shown again after it is made.
 async fn reveal_key(State(s): State<AppState>, actor: Actor) -> ApiResult<Json<serde_json::Value>> {
     if !actor.is_admin() {
         return Err(ApiError::Forbidden(
-            "only admins can see the bridge key".into(),
+            "only admins can manage the bridge key".into(),
         ));
     }
     Ok(Json(
-        serde_json::json!({ "key": midi::ensure_key(&s.pool).await? }),
+        serde_json::json!({ "exists": midi::key_exists(&s.pool).await? }),
     ))
 }
 
@@ -214,8 +214,7 @@ async fn rotate_key(State(s): State<AppState>, actor: Actor) -> ApiResult<Json<s
             "only admins can change the bridge key".into(),
         ));
     }
-    let key = midi::new_key();
-    midi::set_setting(&s.pool, "midi.bridge_key", Some(&key)).await?;
+    let key = midi::rotate_key(&s.pool).await?;
     let mut tx = s.pool.begin().await?;
     log_event(&mut tx, &actor, "midi.key_rotated", &serde_json::json!({})).await?;
     tx.commit().await?;

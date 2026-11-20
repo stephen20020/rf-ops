@@ -130,14 +130,50 @@ pub fn new_key() -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
-/// Make sure a bridge key exists; returns it.
-pub async fn ensure_key(pool: &SqlitePool) -> Result<String, sqlx::Error> {
-    if let Some(k) = setting(pool, "midi.bridge_key").await? {
-        return Ok(k);
+const KEY_HASH: &str = "midi.bridge_key_hash";
+const LEGACY_KEY: &str = "midi.bridge_key";
+
+fn hash_key(k: &str) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(k.as_bytes()))
+}
+
+/// Upgrade a plain bridge key from before step 1b to its hash, so a running bridge keeps
+/// working and the database no longer holds the key itself.
+pub async fn ensure_key(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    if let Some(plain) = setting(pool, LEGACY_KEY).await? {
+        set_setting(pool, KEY_HASH, Some(&hash_key(&plain))).await?;
+        set_setting(pool, LEGACY_KEY, None).await?;
     }
+    Ok(())
+}
+
+/// Make a new bridge key, store only its hash, and return the key (shown once).
+pub async fn rotate_key(pool: &SqlitePool) -> Result<String, sqlx::Error> {
     let k = new_key();
-    set_setting(pool, "midi.bridge_key", Some(&k)).await?;
+    set_setting(pool, KEY_HASH, Some(&hash_key(&k))).await?;
     Ok(k)
+}
+
+pub async fn key_exists(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
+    Ok(setting(pool, KEY_HASH).await?.is_some())
+}
+
+/// Constant-time comparison of a presented key against the stored hash.
+pub async fn key_matches(pool: &SqlitePool, given: &str) -> Result<bool, sqlx::Error> {
+    if given.is_empty() {
+        return Ok(false);
+    }
+    let Some(stored) = setting(pool, KEY_HASH).await? else {
+        return Ok(false);
+    };
+    let a = hash_key(given);
+    Ok(a.len() == stored.len()
+        && a
+            .bytes()
+            .zip(stored.bytes())
+            .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+            == 0)
 }
 
 /// The show MIDI applies to.

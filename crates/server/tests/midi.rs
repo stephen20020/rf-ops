@@ -24,7 +24,7 @@ impl T {
         let pool = db::connect("sqlite::memory:").await.unwrap();
         seed::seed_demo(&pool).await.unwrap();
         let state = AppState::new(pool.clone()).await.unwrap().insecure_header_auth_for_tests().await;
-        let key = midi::ensure_key(&pool).await.unwrap();
+        let key = midi::rotate_key(&pool).await.unwrap();
         T {
             app: app(state.clone()),
             state,
@@ -134,7 +134,13 @@ async fn bridge_needs_the_key() {
         .await;
     assert_eq!(s, StatusCode::FORBIDDEN);
     let k = t.as_admin("POST", "/api/midi/key", json!({})).await;
-    assert_eq!(k["key"], t.key);
+    assert_eq!(k["exists"], true);
+    assert!(k.get("key").is_none(), "the key is never shown again");
+    let stored: Vec<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key LIKE 'midi.bridge_key%'")
+        .fetch_all(&t.pool)
+        .await
+        .unwrap();
+    assert!(stored.iter().all(|v| v != &t.key), "only the hash is stored");
 }
 
 #[tokio::test]

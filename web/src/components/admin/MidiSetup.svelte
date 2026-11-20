@@ -39,12 +39,8 @@
     }
   }
 
-  async function reveal() {
-    const r = await store.act(() => post<{ key: string }>('/api/midi/key'));
-    if (r) key = r.key;
-  }
   async function rotate() {
-    if (!confirm('Make a new bridge key? The bridge on the Playback Mac must be restarted with the new key.')) return;
+    if (!confirm('Make a new bridge key? Any existing key stops working, and the bridge on the Playback Mac must be restarted with the new one.')) return;
     const r = await store.act(() => post<{ key: string }>('/api/midi/key/rotate'), 'New bridge key made');
     if (r) key = r.key;
   }
@@ -103,15 +99,15 @@
         <li>
           {#if key}
             Run: <code class="copy">./target/release/rfops-bridge --server {serverUrl} --key {key}</code>
+            <br /><small>Copy it now: the key is shown only once. RF Ops keeps only a fingerprint of it.</small>
           {:else}
-            <button onclick={reveal} disabled={!store.isAdmin}>Show the bridge key</button> (admins only)
+            <button onclick={rotate} disabled={!store.isAdmin}>Make a bridge key</button> (Lead only; replaces any existing key)
           {/if}
         </li>
         <li>In Playback, set <b>MIDI Out</b> to <b>RF Ops</b> (the bridge creates it). MIDI Out requires the MultiTracks Cloud subscription.</li>
         <li>Give each song a Program Change on channel {channel} matching the numbers below.</li>
         <li>To start it automatically, see <i>docs/operations.md → MIDI bridge</i>.</li>
       </ol>
-      {#if key}<button class="ghost" onclick={rotate}>Make a new key</button>{/if}
     </details>
     {#if !isTarget && status}
       <p class="warnbox">MIDI currently drives a different show (the one in show mode, or the latest rehearsal). Put this show in rehearsal or show mode to follow it.</p>

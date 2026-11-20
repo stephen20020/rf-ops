@@ -14,12 +14,16 @@ use std::{
 use serde::Serialize;
 use sqlx::SqlitePool;
 
-/// Automatic backups kept (about 2 days at 15-minute intervals with no show running).
-pub const KEEP_AUTO: usize = 200;
-/// Pinned backups older than this are removed.
-pub const PINNED_DAYS: i64 = 90;
-/// Below this free space backups pause (and the health page reports critical).
-pub const MIN_FREE_BYTES: u64 = 500 * 1024 * 1024;
+/// Automatic backups kept on the server's disk (R2 keeps 14 days; reliability §2.2).
+pub const KEEP_AUTO: usize = 20;
+/// Pinned backups older than this are removed from the server's disk (R2 keeps 90 days).
+pub const PINNED_DAYS: i64 = 30;
+/// Below this share of free space the health page warns.
+pub const WARN_FREE_PCT: f64 = 25.0;
+/// Below this share, local backups pause (a fresh one is still sent to R2, then deleted).
+pub const CRITICAL_FREE_PCT: f64 = 10.0;
+/// Never write a backup with less than this free, whatever the percentage.
+pub const MIN_FREE_BYTES: u64 = 50 * 1024 * 1024;
 
 pub const SHOW_INTERVAL: Duration = Duration::from_secs(120);
 pub const IDLE_INTERVAL: Duration = Duration::from_secs(15 * 60);
@@ -55,12 +59,41 @@ pub fn free_bytes(dir: &Path) -> Option<u64> {
     fs4::available_space(dir).ok()
 }
 
+/// Free space on the disk holding `dir`: bytes, percent, and "ok" / "warning" / "critical".
+#[derive(Debug, Clone, Serialize)]
+pub struct DiskState {
+    pub free_bytes: Option<u64>,
+    pub free_pct: Option<f64>,
+    pub state: &'static str,
+}
+
+pub fn disk_state(dir: &Path) -> DiskState {
+    let free = free_bytes(dir);
+    let total = fs4::total_space(dir).ok().filter(|t| *t > 0);
+    let pct = free.zip(total).map(|(f, t)| f as f64 * 100.0 / t as f64);
+    DiskState {
+        free_bytes: free,
+        free_pct: pct.map(|p| (p * 10.0).round() / 10.0),
+        state: state_for(pct, free),
+    }
+}
+
+fn state_for(pct: Option<f64>, free: Option<u64>) -> &'static str {
+    match (pct, free) {
+        (_, Some(f)) if f < MIN_FREE_BYTES => "critical",
+        (Some(p), _) if p < CRITICAL_FREE_PCT => "critical",
+        (Some(p), _) if p < WARN_FREE_PCT => "warning",
+        (Some(_), _) | (None, Some(_)) => "ok",
+        (None, None) => "unknown",
+    }
+}
+
 pub async fn run(pool: &SqlitePool, dir: &Path, reason: &str) -> Result<BackupFile, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     if let Some(free) = free_bytes(dir) {
         if free < MIN_FREE_BYTES {
             return Err(format!(
-                "only {} MB free on the backup disk; backups paused",
+                "only {} MB free on the backup disk; backups stopped",
                 free / 1024 / 1024
             ));
         }
@@ -172,6 +205,12 @@ pub async fn backup_and_ship(
     status: &SharedStatus,
     offsite: Option<&Offsite>,
 ) -> Result<BackupFile, String> {
+    let critical = disk_state(dir).state == "critical";
+    if critical && offsite.is_none() {
+        let e = "disk almost full (under 10 % free): local backups paused".to_string();
+        status.lock().expect("backup status poisoned").last_error = Some(e.clone());
+        return Err(e);
+    }
     let r = run(pool, dir, reason).await;
     {
         let mut st = status.lock().expect("backup status poisoned");
@@ -196,6 +235,11 @@ pub async fn backup_and_ship(
                 tracing::warn!(error = %e, "off-site backup upload failed");
                 st.last_offsite_error = Some(e);
             }
+        }
+        drop(st);
+        if critical && !f.pinned {
+            // Disk nearly full: the copy lives in R2 only.
+            let _ = std::fs::remove_file(dir.join(&f.name));
         }
     }
     r
@@ -249,8 +293,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn disk_thresholds() {
+        let gb = 1024 * 1024 * 1024;
+        assert_eq!(state_for(Some(50.0), Some(gb)), "ok");
+        assert_eq!(state_for(Some(20.0), Some(gb)), "warning");
+        assert_eq!(state_for(Some(9.0), Some(gb)), "critical");
+        assert_eq!(state_for(Some(80.0), Some(10 * 1024 * 1024)), "critical");
+    }
+
+    #[test]
     fn pinned_reasons() {
         assert!(!is_pinned_reason("auto"));
+        assert!(!is_pinned_reason("auto-auth"));
         assert!(is_pinned_reason("show-start"));
         assert!(is_pinned_reason("manual"));
     }

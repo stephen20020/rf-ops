@@ -65,11 +65,11 @@ async fn health_detail(State(s): State<AppState>, actor: Actor) -> ApiResult<Jso
         .as_ref()
         .and_then(|p| file_bytes(&std::path::PathBuf::from(format!("{}-wal", p.display()))));
     let size = db_path.as_ref().and_then(|p| file_bytes(p));
-    let free = s
+    let disk = s
         .backup_dir
         .as_deref()
         .or(db_path.as_deref().and_then(|p| p.parent()))
-        .and_then(crate::backup::free_bytes);
+        .map(crate::backup::disk_state);
     let backup = s
         .backup_status
         .lock()
@@ -77,12 +77,6 @@ async fn health_detail(State(s): State<AppState>, actor: Actor) -> ApiResult<Jso
         .clone();
     let seq = hub::max_seq(&s.pool).await?;
     let bridge = s.midi.lock().expect("midi state poisoned").bridge.clone();
-    let free_state = match free {
-        Some(f) if f < 500 * 1024 * 1024 => "critical",
-        Some(f) if f < 2 * 1024 * 1024 * 1024 => "warning",
-        Some(_) => "ok",
-        None => "unknown",
-    };
     Ok(Json(json!({
         "version": env!("CARGO_PKG_VERSION"),
         "server_time": db::now(),
@@ -95,7 +89,7 @@ async fn health_detail(State(s): State<AppState>, actor: Actor) -> ApiResult<Jso
             "bytes": size,
             "wal_bytes": wal,
         },
-        "disk": { "free_bytes": free, "state": free_state },
+        "disk": disk,
         "backups": {
             "enabled": s.backup_dir.is_some(),
             "last_ok_at": backup.last_ok_at,
