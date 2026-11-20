@@ -7,7 +7,11 @@ mod routes;
 pub mod rules;
 pub mod seed;
 
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 use axum::{extract::FromRequestParts, http::request::Parts, middleware, Router};
 use sqlx::SqlitePool;
@@ -24,6 +28,15 @@ pub struct AppState {
     pub midi: midi::Shared,
     /// Where backups go; `None` disables backups (in-memory databases).
     pub backup_dir: Option<PathBuf>,
+    pub backup_status: backup::SharedStatus,
+    /// Off-site copy of each verified backup (Cloudflare R2 in production).
+    pub offsite: Option<backup::Offsite>,
+    pub started: Instant,
+    /// Increases whenever a standby takes over, so clients know to resync fully.
+    pub epoch: i64,
+    pub presence: hub::Presence,
+    /// Set when startup had to recover the database; shown on the health page.
+    pub startup_note: Option<String>,
 }
 
 impl AppState {
@@ -43,19 +56,99 @@ impl AppState {
             midi_state.clone(),
             hub.clone(),
         ));
+        let epoch = ensure_epoch(&pool).await?;
+        tokio::spawn(housekeeping(pool.clone()));
         Ok(Self {
             pool,
             hub,
             midi: midi_state,
             backup_dir: None,
+            backup_status: Arc::new(Mutex::new(backup::BackupStatus::default())),
+            offsite: None,
+            started: Instant::now(),
+            epoch,
+            presence: hub::Presence::default(),
+            startup_note: None,
         })
     }
 
-    /// Enable backups to `dir`, written every `every` and on entering show mode.
-    pub fn with_backups(mut self, dir: PathBuf, every: Duration) -> Self {
-        tokio::spawn(backup::periodic(self.pool.clone(), dir.clone(), every));
+    /// Enable verified backups to `dir`: every `show_every` while a show is in show mode, every
+    /// `idle_every` otherwise, plus at show start and on demand.
+    pub fn with_backups(
+        mut self,
+        dir: PathBuf,
+        show_every: Duration,
+        idle_every: Duration,
+    ) -> Self {
+        tokio::spawn(backup::periodic(
+            self.pool.clone(),
+            dir.clone(),
+            self.backup_status.clone(),
+            self.offsite.clone(),
+            show_every,
+            idle_every,
+        ));
         self.backup_dir = Some(dir);
         self
+    }
+
+    /// Copy every verified backup off the machine (call before `with_backups`).
+    pub fn with_offsite(mut self, offsite: backup::Offsite) -> Self {
+        self.offsite = Some(offsite);
+        self
+    }
+
+    pub fn with_startup_note(mut self, note: Option<String>) -> Self {
+        self.startup_note = note;
+        self
+    }
+
+    /// Take a backup now (show start, manual). No-op without a backup directory.
+    pub async fn backup_now(&self, reason: &str) -> Option<Result<backup::BackupFile, String>> {
+        let dir = self.backup_dir.as_ref()?;
+        Some(
+            backup::backup_and_ship(
+                &self.pool,
+                dir,
+                reason,
+                &self.backup_status,
+                self.offsite.as_ref(),
+            )
+            .await,
+        )
+    }
+}
+
+async fn ensure_epoch(pool: &SqlitePool) -> Result<i64, sqlx::Error> {
+    let v: Option<String> =
+        sqlx::query_scalar("SELECT value FROM settings WHERE key = 'server.epoch'")
+            .fetch_optional(pool)
+            .await?;
+    match v.and_then(|v| v.parse().ok()) {
+        Some(e) => Ok(e),
+        None => {
+            sqlx::query(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('server.epoch', '1')",
+            )
+            .execute(pool)
+            .await?;
+            Ok(1)
+        }
+    }
+}
+
+/// Hourly: prune idempotency keys and expired sessions, and re-run the integrity check.
+async fn housekeeping(pool: SqlitePool) {
+    loop {
+        tokio::time::sleep(Duration::from_secs(3600)).await;
+        let day_ago = (chrono::Utc::now() - chrono::Duration::hours(24)).to_rfc3339();
+        let _ = sqlx::query("DELETE FROM idempotency WHERE created_at < ?")
+            .bind(&day_ago)
+            .execute(&pool)
+            .await;
+        if let Err(e) = db::quick_check(&pool).await {
+            tracing::error!(problem = %e, "hourly integrity check FAILED; restore from backup after the show");
+        }
     }
 }
 

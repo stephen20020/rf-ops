@@ -50,12 +50,10 @@ async fn list_backups(State(s): State<AppState>) -> ApiResult<Json<serde_json::V
 }
 
 async fn create_backup(State(s): State<AppState>, actor: Actor) -> ApiResult<Json<BackupFile>> {
-    let dir = s
-        .backup_dir
-        .as_ref()
-        .ok_or_else(|| ApiError::bad("backups are not enabled for this database"))?;
-    let f = backup::run(&s.pool, dir, "manual")
+    let f = s
+        .backup_now("manual")
         .await
+        .ok_or_else(|| ApiError::bad("backups are not enabled for this database"))?
         .map_err(ApiError::BadRequest)?;
     let mut tx = s.pool.begin().await?;
     log_event(&mut tx, &actor, "backup.created", &f).await?;

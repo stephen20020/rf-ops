@@ -17,11 +17,12 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio",
 argon2 = "0.5"
 rand = "0.8"
 csv = "1"
+fs4 = "1.1"
+futures-util = "0.3"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
 tokio-tungstenite = "0.26"
-futures-util = "0.3"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"

@@ -179,9 +179,76 @@ fn replay(status: i64, body: Vec<u8>) -> Response {
     res
 }
 
+/// Connected screens, for the Screens menu and the "screen missing" rule.
+#[derive(Clone, Default)]
+pub struct Presence(Arc<std::sync::Mutex<std::collections::HashMap<String, Screen>>>);
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Screen {
+    pub client_id: String,
+    pub operator: String,
+    pub screen: String,
+    pub connected_at: String,
+    pub last_seen_at: String,
+    #[serde(skip)]
+    pub last_seen: std::time::Instant,
+}
+
+impl Presence {
+    fn upsert(&self, client_id: &str, operator: &str, screen: &str) {
+        let mut m = self.0.lock().expect("presence poisoned");
+        let now_s = now();
+        let e = m.entry(client_id.to_owned()).or_insert_with(|| Screen {
+            client_id: client_id.to_owned(),
+            operator: operator.to_owned(),
+            screen: screen.to_owned(),
+            connected_at: now_s.clone(),
+            last_seen_at: now_s.clone(),
+            last_seen: std::time::Instant::now(),
+        });
+        e.operator = operator.to_owned();
+        e.screen = screen.to_owned();
+        e.last_seen_at = now_s;
+        e.last_seen = std::time::Instant::now();
+    }
+
+    fn touch(&self, client_id: &str) {
+        if let Some(e) = self.0.lock().expect("presence poisoned").get_mut(client_id) {
+            e.last_seen_at = now();
+            e.last_seen = std::time::Instant::now();
+        }
+    }
+
+    fn remove(&self, client_id: &str) {
+        self.0.lock().expect("presence poisoned").remove(client_id);
+    }
+
+    /// Screens heard from in the last 30 s, sorted by operator.
+    pub fn list(&self) -> Vec<Screen> {
+        let mut v: Vec<Screen> = self
+            .0
+            .lock()
+            .expect("presence poisoned")
+            .values()
+            .filter(|s| s.last_seen.elapsed() < REAP_AFTER)
+            .cloned()
+            .collect();
+        v.sort_by(|a, b| a.operator.cmp(&b.operator).then(a.screen.cmp(&b.screen)));
+        v
+    }
+}
+
+/// Server heartbeat interval; clients mark themselves STALE after 25 s without any message.
+pub const TICK_EVERY: Duration = Duration::from_secs(10);
+/// A client silent this long (no ping, pong or message) is disconnected.
+pub const REAP_AFTER: Duration = Duration::from_secs(30);
+
 #[derive(Debug, Deserialize)]
 pub struct WsQuery {
     after: Option<i64>,
+    client: Option<String>,
+    operator: Option<String>,
+    screen: Option<String>,
 }
 
 pub async fn ws_handler(
@@ -189,7 +256,7 @@ pub async fn ws_handler(
     State(s): State<AppState>,
     Query(q): Query<WsQuery>,
 ) -> Response {
-    ws.on_upgrade(move |socket| client(socket, s, q.after))
+    ws.on_upgrade(move |socket| client(socket, s, q))
 }
 
 #[derive(Serialize)]
@@ -198,6 +265,7 @@ enum Outgoing<'a> {
     Hello {
         seq: i64,
         server_time: String,
+        epoch: i64,
     },
     Event {
         event: &'a Event,
@@ -206,6 +274,12 @@ enum Outgoing<'a> {
     Resync {
         seq: i64,
     },
+    /// Heartbeat: lets clients detect a half-open connection and correct their clock.
+    Tick {
+        seq: i64,
+        server_time: String,
+        epoch: i64,
+    },
 }
 
 async fn send(socket: &mut WebSocket, msg: &Outgoing<'_>) -> bool {
@@ -213,17 +287,32 @@ async fn send(socket: &mut WebSocket, msg: &Outgoing<'_>) -> bool {
     socket.send(Message::Text(text.into())).await.is_ok()
 }
 
-async fn client(mut socket: WebSocket, s: AppState, after: Option<i64>) {
+async fn client(mut socket: WebSocket, s: AppState, q: WsQuery) {
+    let client_id = q
+        .client
+        .clone()
+        .unwrap_or_else(|| format!("anon-{}", now()));
+    s.presence.upsert(
+        &client_id,
+        q.operator.as_deref().unwrap_or("?"),
+        q.screen.as_deref().unwrap_or("?"),
+    );
+    client_loop(&mut socket, &s, q.after, &client_id).await;
+    s.presence.remove(&client_id);
+}
+
+async fn client_loop(socket: &mut WebSocket, s: &AppState, after: Option<i64>, client_id: &str) {
     // Subscribe before reading the log so nothing falls between replay and live events.
     let mut rx = s.hub.subscribe();
     let Ok(head) = max_seq(&s.pool).await else {
         return;
     };
     if !send(
-        &mut socket,
+        socket,
         &Outgoing::Hello {
             seq: head,
             server_time: now(),
+            epoch: s.epoch,
         },
     )
     .await
@@ -236,43 +325,55 @@ async fn client(mut socket: WebSocket, s: AppState, after: Option<i64>) {
         match events_after(&s.pool, after, REPLAY_LIMIT).await {
             Ok(missed) if (missed.len() as i64) < REPLAY_LIMIT => {
                 for e in &missed {
-                    if !send(&mut socket, &Outgoing::Event { event: e }).await {
+                    if !send(socket, &Outgoing::Event { event: e }).await {
                         return;
                     }
                 }
                 last = missed.last().map(|e| e.seq).unwrap_or(after);
             }
             _ => {
-                if !send(&mut socket, &Outgoing::Resync { seq: head }).await {
+                if !send(socket, &Outgoing::Resync { seq: head }).await {
                     return;
                 }
             }
         }
     }
 
-    let mut ping = tokio::time::interval(Duration::from_secs(15));
-    ping.tick().await;
+    let mut tick = tokio::time::interval(TICK_EVERY);
+    tick.tick().await;
+    let mut heard = std::time::Instant::now();
     loop {
         tokio::select! {
             r = rx.recv() => match r {
                 Ok(e) => {
                     if e.seq > last {
-                        if !send(&mut socket, &Outgoing::Event { event: &e }).await { return; }
+                        if !send(socket, &Outgoing::Event { event: &e }).await { return; }
                         last = e.seq;
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(_)) => {
                     let head = max_seq(&s.pool).await.unwrap_or(last);
-                    if !send(&mut socket, &Outgoing::Resync { seq: head }).await { return; }
+                    if !send(socket, &Outgoing::Resync { seq: head }).await { return; }
                     last = head;
                 }
                 Err(broadcast::error::RecvError::Closed) => return,
             },
             m = socket.recv() => match m {
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return,
-                _ => {}
+                Some(Ok(_)) => {
+                    // Any frame (client ping, pong) proves the connection is alive.
+                    heard = std::time::Instant::now();
+                    s.presence.touch(client_id);
+                }
             },
-            _ = ping.tick() => {
+            _ = tick.tick() => {
+                if heard.elapsed() > REAP_AFTER {
+                    tracing::info!(client = client_id, "closing silent connection");
+                    let _ = socket.send(Message::Close(None)).await;
+                    return;
+                }
+                let msg = Outgoing::Tick { seq: last, server_time: now(), epoch: s.epoch };
+                if !send(socket, &msg).await { return; }
                 if socket.send(Message::Ping(Vec::new().into())).await.is_err() { return; }
             }
         }

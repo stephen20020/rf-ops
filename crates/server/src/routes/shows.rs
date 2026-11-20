@@ -355,10 +355,8 @@ async fn update_show(
     tx.commit().await?;
     if entering_show {
         // Snapshot the database before the show and check batteries straight away.
-        if let Some(dir) = &s.backup_dir {
-            if let Err(e) = crate::backup::run(&s.pool, dir, "show-start").await {
-                tracing::warn!(error = %e, "show-start backup failed");
-            }
+        if let Some(Err(e)) = s.backup_now("show-start").await {
+            tracing::warn!(error = %e, "show-start backup failed");
         }
         if let Err(e) = crate::rules::evaluate(&s.pool).await {
             tracing::warn!(error = %e, "rule evaluation failed");

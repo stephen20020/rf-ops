@@ -645,10 +645,11 @@ async fn backups_and_report() {
         .unwrap();
     seed::seed_demo(&pool).await.unwrap();
     let backups = dir.join("backups");
-    let state = AppState::new(pool.clone())
-        .await
-        .unwrap()
-        .with_backups(backups.clone(), std::time::Duration::from_secs(3600));
+    let state = AppState::new(pool.clone()).await.unwrap().with_backups(
+        backups.clone(),
+        std::time::Duration::from_secs(3600),
+        std::time::Duration::from_secs(3600),
+    );
     let t = T::with_state(state, pool);
     let show = t.show_id().await;
 
@@ -670,7 +671,15 @@ async fn backups_and_report() {
         .map(|f| f["name"].as_str().unwrap())
         .collect();
     assert_eq!(names.len(), 2, "{names:?}");
-    assert!(names.iter().any(|n| n.ends_with("-show-start.db")));
+    assert!(
+        names.iter().any(|n| n.ends_with("-show-start-pin.db")),
+        "show-start backups are pinned"
+    );
+    assert!(list["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|f| f["verified"] == true));
     // The backup is a working database.
     let copy = db::connect(&format!("sqlite://{}", backups.join(names[0]).display()))
         .await
