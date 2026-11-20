@@ -1,6 +1,6 @@
-import { get, post, setOperator, ApiError } from './api';
+import { get, post, send, setOperator, setToken, handleUnauthorized, ApiError } from './api';
 import type {
-  Alert, BatteryStatus, Effective, Equipment, Id, Kit, Performer, ServerEvent, Snapshot, Song, User, WsMessage,
+  Alert, BatteryStatus, Effective, Equipment, Id, Kit, Performer, ServerEvent, Snapshot, Song, SwapPayload, User, WsMessage,
 } from './types';
 
 function load(key: string): string | null {
@@ -25,6 +25,10 @@ class Store {
   snapshot = $state<Snapshot | null>(null);
   showId = $state<Id | null>(Number(load('rfops.show')) || null);
   operatorName = $state<string>(load('rfops.operator') ?? '');
+  token = $state<string>(load('rfops.token') ?? '');
+  /** Set when the server rejects this operator for lack of a PIN sign-in. */
+  needsPin = $state(false);
+  dismissedSwaps = $state<number[]>([]);
   connected = $state(false);
   loaded = $state(false);
   lastSyncAt = $state(0);
@@ -50,6 +54,13 @@ class Store {
   canEdit = $derived(this.bootstrap ? !!this.operatorName : !!this.user && this.user.role !== 'viewer');
   isAdmin = $derived(this.bootstrap || this.user?.role === 'admin');
   staleSeconds = $derived(this.lastSyncAt ? Math.floor((this.now - this.lastSyncAt) / 1000) : 0);
+  showMode = $derived(this.show?.show.mode === 'show');
+  /** Swaps from the last 3 minutes that this screen has not dismissed, newest first. */
+  swapBanners = $derived(
+    (this.show?.recent_swaps ?? [])
+      .filter((e) => this.now - Date.parse(e.at) < 180_000 && !this.dismissedSwaps.includes(e.seq))
+      .map((e) => ({ seq: e.seq, at: e.at, actor: e.actor, swap: e.payload as SwapPayload })),
+  );
 
   private ws: WebSocket | null = null;
   private backoff = 500;
@@ -60,6 +71,11 @@ class Store {
 
   start() {
     setOperator(this.operatorName);
+    setToken(this.token);
+    handleUnauthorized(() => {
+      this.needsPin = true;
+      this.setToken('');
+    });
     setInterval(() => (this.now = Date.now()), 1000);
     void this.refresh();
     this.connect();
@@ -69,6 +85,36 @@ class Store {
     this.operatorName = name;
     setOperator(name);
     save('rfops.operator', name || null);
+  }
+
+  setToken(t: string) {
+    this.token = t;
+    setToken(t);
+    save('rfops.token', t || null);
+  }
+
+  /** Sign in (PIN may be empty for operators without one). */
+  async login(name: string, pin: string): Promise<boolean> {
+    try {
+      const r = await post<{ token: string }>('/api/login', { name, pin });
+      this.setOperator(name);
+      this.setToken(r.token);
+      this.needsPin = false;
+      return true;
+    } catch (e) {
+      this.toast(e instanceof Error ? e.message : String(e), 'error');
+      return false;
+    }
+  }
+
+  async logout() {
+    try {
+      await send('POST', '/api/logout', {});
+    } catch {
+      /* ignore */
+    }
+    this.setToken('');
+    this.setOperator('');
   }
 
   selectShow(id: Id | null) {
@@ -162,6 +208,14 @@ class Store {
     this.lastSeq = e.seq;
     this.lastSyncAt = Date.now();
     const p = e.payload as Record<string, unknown> | null;
+    if (e.type === 'swap.performed') {
+      this.criticalPulse++;
+      try {
+        navigator.vibrate?.([120, 60, 120]);
+      } catch {
+        /* not supported */
+      }
+    }
     if (e.type === 'alert.opened' && p?.severity === 'critical') {
       this.criticalPulse++;
       this.toast(`CRITICAL: ${String(p.title)}`, 'critical');

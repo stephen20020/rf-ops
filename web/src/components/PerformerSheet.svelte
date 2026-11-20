@@ -5,11 +5,13 @@
   import Modal from './Modal.svelte';
   import RaiseAlert from './RaiseAlert.svelte';
   import AlertList from './AlertList.svelte';
-  import type { Id, Performer } from '../lib/types';
+  import SwapSheet from './SwapSheet.svelte';
+  import type { Id, Kit, Performer } from '../lib/types';
 
-  let { performer, onclose }: { performer: Performer; onclose: () => void } = $props();
+  let { performer, onclose, alertId = null }: { performer: Performer; onclose: () => void; alertId?: Id | null } = $props();
 
   let raising = $state<{ equipment: Id | null } | null>(null);
+  let swapping = $state<Kit | null>(null);
 
   const now = $derived(store.kitsFor(store.show?.effective, performer.id));
   const next = $derived(store.kitsFor(store.show?.next_effective, performer.id));
@@ -21,7 +23,9 @@
   }
 </script>
 
-{#if raising}
+{#if swapping}
+  <SwapSheet {performer} from={swapping} {alertId} onclose={() => { swapping = null; onclose(); }} />
+{:else if raising}
   <RaiseAlert performerId={performer.id} equipmentId={raising.equipment} onclose={() => (raising = null)} />
 {:else}
   <Modal title={performer.name} {onclose}>
@@ -39,6 +43,7 @@
         <div class="muted">
           {store.label(k.base_id)} · {store.label(k.carrier_id)}{#if k.element_id}{' + '}{store.label(k.element_id)}{/if}
         </div>
+        <button class="warn big" onclick={() => (swapping = k)} disabled={!store.connected || !store.canEdit} data-testid="swap-kit">⇄ Swap to spare</button>
         {#if b && k.carrier_id != null}
           {@const carrier = k.carrier_id}
           <div class="row">

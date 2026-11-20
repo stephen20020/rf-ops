@@ -1,6 +1,9 @@
+mod auth;
+mod data;
 pub(crate) mod inventory;
 mod live;
 pub(crate) mod ops;
+mod showops;
 pub(crate) mod shows;
 
 use axum::{routing::get, Json, Router};
@@ -15,6 +18,9 @@ pub fn router() -> Router<AppState> {
         .merge(shows::router())
         .merge(ops::router())
         .merge(live::router())
+        .merge(auth::router())
+        .merge(showops::router())
+        .merge(data::router())
 }
 
 async fn health() -> Json<Value> {

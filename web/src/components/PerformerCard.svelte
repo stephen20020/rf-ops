@@ -42,7 +42,7 @@
 </button>
 
 <style>
-  .card { display: grid; gap: 8px; text-align: left; padding: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); font-weight: 400; width: 100%; }
+  .card { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; overflow: hidden; gap: 8px; text-align: left; padding: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); font-weight: 400; width: 100%; }
   .card.crit { border-color: var(--crit); box-shadow: inset 0 0 0 2px var(--crit); }
   .card.warned { border-color: var(--warn); }
   .card.off { opacity: 0.7; }

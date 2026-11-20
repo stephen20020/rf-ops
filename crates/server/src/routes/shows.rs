@@ -105,6 +105,24 @@ fn kit_kind(s: &str) -> ApiResult<KitKind> {
 
 // ---------------- loading helpers ----------------
 
+/// Show mode locks kits and assignments (swaps, checkouts, battery checks, alerts and setlist
+/// changes stay allowed). Switch the show back to rehearsal to edit.
+pub(crate) async fn ensure_editable(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    show_id: i64,
+) -> ApiResult<()> {
+    let mode: Option<String> = sqlx::query_scalar("SELECT mode FROM shows WHERE id = ?")
+        .bind(show_id)
+        .fetch_optional(&mut **tx)
+        .await?;
+    if mode.as_deref() == Some("show") {
+        return Err(ApiError::Conflict(
+            "Show mode is on: kits and assignments are locked. Use Swap to spare, or switch the show to rehearsal to edit.".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) async fn fetch_show<'e, E: sqlx::SqliteExecutor<'e>>(e: E, id: i64) -> ApiResult<Show> {
     sqlx::query_as::<_, Show>("SELECT * FROM shows WHERE id = ?")
         .bind(id)
@@ -316,6 +334,7 @@ async fn update_show(
         check_time(&v)?;
         show.call_time = v;
     }
+    let entering_show = patch.mode.as_deref() == Some("show") && show.mode != "show";
     if let Some(v) = patch.mode {
         if !MODES.contains(&v.as_str()) {
             return Err(ApiError::bad(format!("mode must be one of {MODES:?}")));
@@ -332,6 +351,17 @@ async fn update_show(
         .await?;
     log_event(&mut tx, &actor, "show.updated", &show).await?;
     tx.commit().await?;
+    if entering_show {
+        // Snapshot the database before the show and check batteries straight away.
+        if let Some(dir) = &s.backup_dir {
+            if let Err(e) = crate::backup::run(&s.pool, dir, "show-start").await {
+                tracing::warn!(error = %e, "show-start backup failed");
+            }
+        }
+        if let Err(e) = crate::rules::evaluate(&s.pool).await {
+            tracing::warn!(error = %e, "rule evaluation failed");
+        }
+    }
     Ok(Json(show))
 }
 
@@ -342,6 +372,7 @@ async fn delete_show(
 ) -> ApiResult<StatusCode> {
     let mut tx = s.pool.begin().await?;
     let show = fetch_show(&mut *tx, id).await?;
+    ensure_editable(&mut tx, id).await?;
     sqlx::query("DELETE FROM shows WHERE id = ?")
         .bind(id)
         .execute(&mut *tx)
@@ -760,6 +791,7 @@ async fn create_kit(
     }
     let mut tx = s.pool.begin().await?;
     fetch_show(&mut *tx, show_id).await?;
+    ensure_editable(&mut tx, show_id).await?;
     validate_kit_slots(&mut tx, kind, n.base_id, n.carrier_id, n.element_id).await?;
     let id = sqlx::query(
         "INSERT INTO kits (show_id, kind, name, base_id, carrier_id, element_id, console_channel, console_channel_name, dca, iem_mix, is_spare)
@@ -793,6 +825,7 @@ async fn update_kit(
 ) -> ApiResult<Json<Kit>> {
     let mut tx = s.pool.begin().await?;
     let mut k = fetch_kit(&mut *tx, id).await?;
+    ensure_editable(&mut tx, k.show_id).await?;
     if let Some(v) = p.name {
         if v.trim().is_empty() {
             return Err(ApiError::bad("name is required"));
@@ -858,6 +891,7 @@ async fn delete_kit(
 ) -> ApiResult<StatusCode> {
     let mut tx = s.pool.begin().await?;
     let k = fetch_kit(&mut *tx, id).await?;
+    ensure_editable(&mut tx, k.show_id).await?;
     sqlx::query("DELETE FROM kits WHERE id = ?")
         .bind(id)
         .execute(&mut *tx)
@@ -897,6 +931,7 @@ async fn create_assignment(
     }
     let mut tx = s.pool.begin().await?;
     fetch_show(&mut *tx, show_id).await?;
+    ensure_editable(&mut tx, show_id).await?;
     if let Some(kit_id) = n.kit_id {
         let k = fetch_kit(&mut *tx, kit_id)
             .await
@@ -978,6 +1013,7 @@ async fn set_cell(
     }
     let mut tx = s.pool.begin().await?;
     fetch_show(&mut *tx, show_id).await?;
+    ensure_editable(&mut tx, show_id).await?;
     if let Some(song_id) = c.song_id {
         let song = fetch_song(&mut *tx, song_id)
             .await
@@ -1062,6 +1098,7 @@ async fn delete_assignment(
         .fetch_optional(&mut *tx)
         .await?
         .ok_or(ApiError::NotFound)?;
+    ensure_editable(&mut tx, a.show_id).await?;
     sqlx::query("DELETE FROM assignments WHERE id = ?")
         .bind(id)
         .execute(&mut *tx)

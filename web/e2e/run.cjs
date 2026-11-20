@@ -186,6 +186,100 @@ async function timed(fn) {
     await v.ctx.close();
   });
 
+  await test('swap to spare in 3 taps from an alert; FOH banner in < 1 s', async () => {
+    const snap = await (await fetch(`${base}/api/snapshot`)).json();
+    const maya = snap.performers.find((p) => p.name === 'Maya').id;
+    const r = await fetch(`${base}/api/alerts`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-rfops-actor': 'FOH' },
+      body: JSON.stringify({ severity: 'critical', title: 'Vox 1 dropping out', performer_id: maya, show_id: snap.shows[0].id }),
+    });
+    assert.equal(r.status, 201);
+    const alert = back.page.getByTestId('alert').filter({ hasText: 'Vox 1 dropping out' });
+    await alert.waitFor({ timeout: 1000 });
+    // Tap 1: Swap on the alert. Tap 2: Swap to spare on the Vox 1 kit. Tap 3: the spare.
+    await alert.getByTestId('alert-swap').click();
+    await back.page.locator('.kit', { hasText: 'Vox 1' }).getByTestId('swap-kit').click();
+    const banner = foh.page.getByTestId('swap-banner').filter({ hasText: 'Maya' });
+    const ms = await timed(async () => {
+      await back.page.getByTestId('swap-option').filter({ hasText: 'Spare HH A' }).click();
+      await banner.waitFor({ timeout: 1000 });
+    });
+    assert.ok(ms < 1000, `took ${ms} ms`);
+    const text = await banner.textContent();
+    assert.match(text, /now on\s*Ch 9/);
+    assert.match(text, /was Ch 2/);
+    // FOH channel table follows, the alert is acknowledged, the failed pack is faulty.
+    await foh.page.getByTestId('foh-row').filter({ hasText: 'Spare HH A' }).filter({ hasText: 'Maya' }).waitFor({ timeout: 1000 });
+    await back.page.locator('[data-testid=alert][data-state=acknowledged]').filter({ hasText: 'Vox 1 dropping out' }).waitFor({ timeout: 1000 });
+    const eq = await (await fetch(`${base}/api/equipment?kind=handheld_tx`)).json();
+    assert.equal(eq.find((e) => e.label === 'HH2').status, 'faulty');
+    await foh.page.getByTestId('swap-banner').getByRole('button', { name: 'Got it' }).click();
+    await foh.page.getByTestId('swap-banner').waitFor({ state: 'detached', timeout: 1000 });
+  });
+
+  await test('show mode: checklist, lock, automatic battery alerts', async () => {
+    const admin = await client(browser, base, 'Admin', '#/admin', { width: 1440, height: 900 });
+    await admin.page.getByRole('tab', { name: 'Show & kits' }).click();
+    await admin.page.getByTestId('enter-show-mode').click();
+    await admin.page.getByTestId('confirm-show-mode').click();
+    await back.page.getByTestId('mode').filter({ hasText: 'SHOW MODE' }).waitFor({ timeout: 1000 });
+    await admin.page.getByTestId('show-lock').waitFor({ timeout: 1000 });
+    await admin.page.getByRole('tab', { name: /Assignments/ }).click();
+    const firstCell = admin.page.locator('td select').first();
+    assert.equal(await firstCell.isDisabled(), true, 'grid locked');
+    // Server enforces it too.
+    const snap = await (await fetch(`${base}/api/snapshot`)).json();
+    const show = snap.shows[0].id;
+    const r = await fetch(`${base}/api/shows/${show}/assignments/cell`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', 'x-rfops-actor': 'Admin' },
+      body: JSON.stringify({ performer_id: snap.performers[0].id, kind: 'mic', song_id: null, kit_ids: [] }),
+    });
+    assert.equal(r.status, 409);
+    // Battery rule alerts for unchecked packs in use show up on FOH.
+    const group = foh.page.getByTestId('battery-group');
+    await group.waitFor({ timeout: 3000 });
+    assert.match(await group.textContent(), /\d+ packs need a battery check/);
+    // Grouped rows expand on tap.
+    await group.click();
+    await foh.page.getByTestId('alert').filter({ hasText: 'Battery not checked' }).first().waitFor({ timeout: 1000 });
+    await admin.ctx.close();
+  });
+
+  await test('PIN: operator with a PIN must sign in on the PIN pad', async () => {
+    const snap = await (await fetch(`${base}/api/snapshot`)).json();
+    const sr = snap.users.find((u) => u.name === 'A2 Stage Right').id;
+    const r = await fetch(`${base}/api/users/${sr}/pin`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', 'x-rfops-actor': 'Admin' },
+      body: JSON.stringify({ pin: '4821' }),
+    });
+    assert.equal(r.status, 200);
+    // Next change from the stage-right screen is refused and sends it to sign-in.
+    await right.page.getByTestId('raise-alert').click();
+    await right.page.getByRole('button', { name: 'Crackle / noise' }).click();
+    await right.page.getByRole('button', { name: 'Raise alert', exact: true }).last().click();
+    await right.page.getByText('Please sign in again').waitFor({ timeout: 2000 });
+    await right.page.getByRole('button', { name: /A2 Stage Right/ }).click();
+    for (const k of '4821') await right.page.getByRole('button', { name: k, exact: true }).click();
+    await right.page.getByRole('button', { name: 'OK', exact: true }).click();
+    await right.page.getByTestId('raise-alert').waitFor({ timeout: 2000 });
+    await right.page.getByTestId('raise-alert').click();
+    await right.page.getByRole('button', { name: 'Crackle / noise' }).click();
+    await right.page.getByRole('button', { name: 'Raise alert', exact: true }).last().click();
+    await foh.page.getByTestId('alert').filter({ hasText: 'Crackle / noise' }).waitFor({ timeout: 1000 });
+  });
+
+  await test('post-show report lists the swap', async () => {
+    const p = back.page;
+    await p.goto(`${base}/#/report`);
+    await p.getByText('post-show report').waitFor({ timeout: 2000 });
+    await p.locator('td', { hasText: 'Spare HH A' }).first().waitFor({ timeout: 1000 });
+    await p.locator('td', { hasText: 'HH2' }).first().waitFor({ timeout: 1000 });
+    await p.goto(`${base}/#/backstage`);
+  });
+
   await test('no page errors in any client', async () => {
     assert.deepEqual([...back.errors, ...foh.errors, ...right.errors], []);
   });

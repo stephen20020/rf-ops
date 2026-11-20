@@ -32,8 +32,17 @@ function sessionValue(key: string, make: () => string): string {
 export const clientId = sessionValue('rfops.client', () => `web-${uid().slice(0, 8)}`);
 
 let operator = '';
+let token = '';
 export function setOperator(name: string) {
   operator = name;
+}
+export function setToken(t: string) {
+  token = t;
+}
+/** Called when the server says this operator must sign in with a PIN. */
+let onUnauthorized: (() => void) | null = null;
+export function handleUnauthorized(fn: () => void) {
+  onUnauthorized = fn;
 }
 
 export async function get<T>(path: string): Promise<T> {
@@ -66,6 +75,7 @@ export async function send<T = unknown>(method: 'POST' | 'PATCH' | 'PUT' | 'DELE
           'x-rfops-actor': operator,
           'x-rfops-client': clientId,
           'x-rfops-idempotency-key': key,
+          ...(token ? { 'x-rfops-token': token } : {}),
         },
         body: body === undefined ? undefined : JSON.stringify(body),
       });
@@ -73,7 +83,10 @@ export async function send<T = unknown>(method: 'POST' | 'PATCH' | 'PUT' | 'DELE
       lastErr = e;
       continue;
     }
-    if (!res.ok) throw new ApiError(res.status, await errorText(res));
+    if (!res.ok) {
+      if (res.status === 401) onUnauthorized?.();
+      throw new ApiError(res.status, await errorText(res));
+    }
     if (res.status === 204) return undefined as T;
     const text = await res.text();
     return (text ? JSON.parse(text) : undefined) as T;
@@ -85,3 +98,25 @@ export const post = <T = unknown>(p: string, b?: unknown) => send<T>('POST', p, 
 export const patch = <T = unknown>(p: string, b: unknown) => send<T>('PATCH', p, b);
 export const put = <T = unknown>(p: string, b: unknown) => send<T>('PUT', p, b);
 export const del = (p: string) => send('DELETE', p);
+
+/** POST a raw text body (CSV imports). Returns status and parsed JSON. */
+export async function postText(path: string, body: string): Promise<{ status: number; json: any }> {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: {
+      'content-type': 'text/csv',
+      'x-rfops-actor': operator,
+      'x-rfops-client': clientId,
+      ...(token ? { 'x-rfops-token': token } : {}),
+    },
+    body,
+  });
+  if (res.status === 401) onUnauthorized?.();
+  let json: any = null;
+  try {
+    json = await res.json();
+  } catch {
+    /* empty */
+  }
+  return { status: res.status, json };
+}

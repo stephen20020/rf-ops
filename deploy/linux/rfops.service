@@ -1,0 +1,18 @@
+# RF Ops server as a systemd service. Install: see docs/operations.md.
+[Unit]
+Description=RF Ops backstage wireless server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=rfops
+WorkingDirectory=/opt/rf-ops
+Environment=RFOPS_DB=sqlite:///opt/rf-ops/data/rfops.db
+Environment=RFOPS_ADDR=0.0.0.0:8080
+Environment=RFOPS_WEB=/opt/rf-ops/web/dist
+ExecStart=/opt/rf-ops/target/release/rfops-server
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

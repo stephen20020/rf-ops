@@ -1,10 +1,12 @@
+pub mod backup;
 pub mod db;
 pub mod error;
 pub mod hub;
 mod routes;
+pub mod rules;
 pub mod seed;
 
-use std::{path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use axum::{extract::FromRequestParts, http::request::Parts, middleware, Router};
 use sqlx::SqlitePool;
@@ -18,13 +20,32 @@ use hub::Hub;
 pub struct AppState {
     pub pool: SqlitePool,
     pub hub: Arc<Hub>,
+    /// Where backups go; `None` disables backups (in-memory databases).
+    pub backup_dir: Option<PathBuf>,
 }
 
 impl AppState {
-    /// Creates the state and starts the event broadcaster. Must be called inside a Tokio runtime.
+    /// Creates the state and starts the event broadcaster and rule engine. Must be called inside
+    /// a Tokio runtime.
     pub async fn new(pool: SqlitePool) -> Result<Self, sqlx::Error> {
         let hub = Hub::start(pool.clone()).await?;
-        Ok(Self { pool, hub })
+        tokio::spawn(rules::run(
+            pool.clone(),
+            hub.clone(),
+            Duration::from_secs(15),
+        ));
+        Ok(Self {
+            pool,
+            hub,
+            backup_dir: None,
+        })
+    }
+
+    /// Enable backups to `dir`, written every `every` and on entering show mode.
+    pub fn with_backups(mut self, dir: PathBuf, every: Duration) -> Self {
+        tokio::spawn(backup::periodic(self.pool.clone(), dir.clone(), every));
+        self.backup_dir = Some(dir);
+        self
     }
 }
 
@@ -53,6 +74,7 @@ pub fn app_with_web(state: AppState, web_dir: Option<PathBuf>) -> Router {
 pub const ACTOR_HEADER: &str = "x-rfops-actor";
 pub const CLIENT_HEADER: &str = "x-rfops-client";
 pub const IDEMPOTENCY_HEADER: &str = "x-rfops-idempotency-key";
+pub const TOKEN_HEADER: &str = "x-rfops-token";
 
 impl FromRequestParts<AppState> for Actor {
     type Rejection = ApiError;
@@ -78,14 +100,30 @@ impl FromRequestParts<AppState> for Actor {
             .fetch_optional(&state.pool)
             .await?;
         let role = if any_users.is_some() {
-            let role: Option<String> = sqlx::query_scalar("SELECT role FROM users WHERE name = ?")
-                .bind(&name)
-                .fetch_optional(&state.pool)
-                .await?;
-            let role =
-                role.ok_or_else(|| ApiError::Forbidden(format!("unknown operator '{name}'")))?;
+            let row: Option<(i64, String, bool)> =
+                sqlx::query_as("SELECT id, role, pin_hash IS NOT NULL FROM users WHERE name = ?")
+                    .bind(&name)
+                    .fetch_optional(&state.pool)
+                    .await?;
+            let (user_id, role, has_pin) =
+                row.ok_or_else(|| ApiError::Forbidden(format!("unknown operator '{name}'")))?;
             if role == "viewer" {
                 return Err(ApiError::Forbidden("viewers cannot make changes".into()));
+            }
+            if has_pin {
+                let token = header(TOKEN_HEADER).unwrap_or_default();
+                let ok: Option<i64> = sqlx::query_scalar(
+                    "SELECT user_id FROM sessions WHERE token = ? AND user_id = ?",
+                )
+                .bind(&token)
+                .bind(user_id)
+                .fetch_optional(&state.pool)
+                .await?;
+                if ok.is_none() {
+                    return Err(ApiError::Unauthorized(format!(
+                        "PIN sign-in required for {name}"
+                    )));
+                }
             }
             Some(role)
         } else {

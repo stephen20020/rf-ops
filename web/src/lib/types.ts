@@ -16,7 +16,7 @@ export interface Equipment {
   serial: string | null; parent_id: Id | null; channel_no: number | null; ip_address: string | null;
   status: EquipmentStatus; notes: string;
 }
-export interface User { id: Id; name: string; role: Role }
+export interface User { id: Id; name: string; role: Role; has_pin: boolean }
 export interface Performer {
   id: Id; name: string; role: string; photo_path: string | null; notes: string;
   owner_user_id: Id | null; zone: string | null;
@@ -74,7 +74,7 @@ export interface ShowSnapshot {
   show: Show; songs: Song[]; kits: Kit[]; assignments: Assignment[];
   effective: Effective; next_effective: Effective | null; next_song_id: Id | null;
   handoff_plan: Transition[]; upcoming: Transition[]; handoffs_done: HandoffDone[];
-  conflicts: ConflictReport; battery: BatteryStatus[];
+  conflicts: ConflictReport; battery: BatteryStatus[]; recent_swaps: ServerEvent[];
 }
 export interface Snapshot {
   seq: number; server_time: string; users: User[]; performers: Performer[]; equipment: Equipment[];
@@ -88,3 +88,20 @@ export type WsMessage =
   | { type: 'hello'; seq: number; server_time: string }
   | { type: 'event'; event: ServerEvent }
   | { type: 'resync'; seq: number };
+
+export interface KitRef {
+  id: Id; name: string; console_channel: number | null; console_channel_name: string | null; iem_mix: string | null;
+}
+export interface SwapPayload {
+  show_id: Id; swap_id: Id; performer_id: Id; performer_name: string; from_kit: KitRef; to_kit: KitRef;
+  scope: 'song' | 'rest_of_show'; songs_changed: Id[]; faulty_item_id: Id | null; reason: string; alert_id: Id | null;
+}
+export interface BackupFile { name: string; bytes: number; created_at: string }
+export interface Report {
+  show: Show; generated_at: string; alerts: Alert[];
+  swaps: { id: Id; at: string; by: string; performer: string; from_kit: string | null; to_kit: string; scope: string; song: string | null; reason: string }[];
+  battery_checks: { checked_at: string; checked_by: string; label: string; result: string; battery_type: string }[];
+  faulty_items: { id: Id; label: string; kind: string; model: string; notes: string }[];
+  song_changes: { at: string; actor: string; song: string | null; source: string | null }[];
+  handoffs_done: number;
+}

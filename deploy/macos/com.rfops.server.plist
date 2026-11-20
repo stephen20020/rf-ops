@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  RF Ops server as a macOS LaunchAgent: starts at login, restarts if it stops.
+  Install: see docs/operations.md. Replace RFOPS_HOME with the full path to your rf-ops folder.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.rfops.server</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>RFOPS_HOME/target/release/rfops-server</string>
+  </array>
+  <key>WorkingDirectory</key><string>RFOPS_HOME</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>RFOPS_DB</key><string>sqlite://RFOPS_HOME/data/rfops.db</string>
+    <key>RFOPS_ADDR</key><string>0.0.0.0:8080</string>
+    <key>RFOPS_WEB</key><string>RFOPS_HOME/web/dist</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>RFOPS_HOME/data/server.log</string>
+  <key>StandardErrorPath</key><string>RFOPS_HOME/data/server.log</string>
+</dict>
+</plist>

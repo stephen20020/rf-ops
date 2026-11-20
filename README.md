@@ -4,8 +4,10 @@ Backstage wireless mic & IEM operations system: equipment, performer assignments
 checkout/return, battery checks, and alerts — shared live between backstage A2s and FOH on a local
 network, with no internet required.
 
-Status: **Phase 2 (live sync + screens)**. Backstage wall/phone, FOH and Admin screens share state
-in real time over WebSocket. See [`docs/BRIEF.md`](docs/BRIEF.md) for the full
+Status: **Phase 3 (show-ready manual operation)**. Backstage wall/phone, FOH and Admin screens share
+state in real time; 3-tap swap to spare with FOH banner, PIN sign-in, show-mode lock, automatic
+battery alerts, backups, CSV/show import-export, post-show report. Hardware integrations (MIDI,
+Shure, Sennheiser) come next. Install and show-day procedures: [`docs/operations.md`](docs/operations.md). See [`docs/BRIEF.md`](docs/BRIEF.md) for the full
 plan and [`docs/requirements.md`](docs/requirements.md) for the venue's known setup and open questions.
 
 ## Layout
@@ -41,18 +43,21 @@ Screens:
 - **FOH** (`#/foh`) — channel list by console channel and IEM mix: who is on it now and next song,
   pack, battery, alerts.
 - **Admin** (`#/admin`) — assignment grid (default + per-song overrides, conflicts in red), show,
-  setlist and kits, inventory, performers and operators.
+  setlist and kits, show-mode checklist, inventory, performers and operators (PINs), Data (CSV,
+  show files, backups).
+- **Report** (`#/report`) — printable post-show report.
 
 Environment variables:
 
 - `RFOPS_DB` — SQLite URL (default `sqlite://rfops.db`)
 - `RFOPS_ADDR` — listen address (default `0.0.0.0:8080`)
 - `RFOPS_WEB` — built web client folder (default `web/dist`)
+- `RFOPS_BACKUP_DIR` — backup folder (default `backups/` next to the database)
 
 Mutating requests need an `x-rfops-actor: <operator name>` header. Until the first operator exists,
 any name may act; after that the name must match an operator, and `viewer` operators are read-only.
-`x-rfops-client` is recorded in the event log; `x-rfops-idempotency-key` makes retries safe.
-(PIN sign-in comes in Phase 3.)
+Operators with a PIN must also send `x-rfops-token` from `POST /api/login`. `x-rfops-client` is
+recorded in the event log; `x-rfops-idempotency-key` makes retries safe.
 
 ## Test
 
@@ -65,9 +70,10 @@ cargo clippy --all-targets -- -D warnings
 cd web && npm run check && npm run build && npm run test:e2e
 ```
 
-The e2e suite drives three browsers against a real server: alert raise → FOH in < 1 s, ack and
+The e2e suite drives several browsers against a real server: alert raise → FOH in < 1 s, ack and
 resolve sync, song advance, handoff ticks, server kill/restart with offline blocking and resync,
-48 px touch targets, and the viewer role. It needs Playwright with Chromium installed.
+48 px touch targets, viewer role, 3-tap swap with FOH banner in < 1 s, show-mode lock and battery
+alerts, PIN sign-in, and the post-show report. It needs Playwright with Chromium installed.
 
 ## Live sync
 
@@ -118,3 +124,11 @@ resolve sync, song advance, handoff ticks, server kill/restart with offline bloc
 | `POST /api/shows/{id}/advance` | Next / previous non-skipped song |
 | `POST /api/shows/{id}/handoffs/done` | Tick / untick a handoff |
 | `PUT /api/shows/{id}/assignments/cell` | Set one assignment-grid cell atomically |
+| `POST /api/shows/{id}/swap` | Swap a performer to another kit (song / rest of show), optional mark faulty |
+| `GET /api/shows/{id}/report` | Post-show report data |
+| `POST /api/login`, `POST /api/logout`, `PUT /api/users/{id}/pin` | PIN sign-in |
+| `GET/POST /api/backups` | List / create backups |
+| `GET /api/shows/{id}/export`, `POST /api/shows/import` | Show file (JSON) |
+| `GET /api/export/equipment.csv`, `POST /api/import/equipment` | Inventory CSV round-trip |
+| `GET /api/export/performers.csv`, `POST /api/import/performers` | Performers CSV round-trip |
+| `GET /api/shows/{id}/export/plot.csv` | Mic plot CSV |

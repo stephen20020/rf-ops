@@ -25,7 +25,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if seed_demo && seed::seed_demo(&pool).await? {
         tracing::info!("demo data inserted");
     }
-    let state = AppState::new(pool).await?;
+    let mut state = AppState::new(pool).await?;
+    // Backups go next to the database file unless RFOPS_BACKUP_DIR says otherwise.
+    let db_file = db_url
+        .trim_start_matches("sqlite://")
+        .trim_start_matches("sqlite:")
+        .split('?')
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    if !db_file.contains(":memory:") {
+        let dir = std::env::var("RFOPS_BACKUP_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                PathBuf::from(&db_file)
+                    .parent()
+                    .map(|p| p.join("backups"))
+                    .unwrap_or_else(|| PathBuf::from("backups"))
+            });
+        tracing::info!(dir = %dir.display(), "backups enabled (every 15 min and at show start)");
+        state = state.with_backups(dir, std::time::Duration::from_secs(15 * 60));
+    }
     let listener = tokio::net::TcpListener::bind(addr).await?;
     match &web_dir {
         Some(d) => {

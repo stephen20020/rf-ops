@@ -2,6 +2,7 @@
   import { store } from '../../lib/store.svelte';
   import { del, patch, post } from '../../lib/api';
   import { consoleTag, KIND_LABEL } from '../../lib/format';
+  import ShowModeChecklist from './ShowModeChecklist.svelte';
   import type { EquipmentKind, KitKind, Show } from '../../lib/types';
 
   const SLOTS: Record<KitKind, { base: EquipmentKind[]; carrier: EquipmentKind[]; element: EquipmentKind[] }> = {
@@ -12,6 +13,7 @@
 
   const show = $derived(store.show);
   let newShow = $state('');
+  let checklist = $state(false);
   let newSong = $state('');
   let kit = $state({ kind: 'mic' as KitKind, name: '', base_id: null as number | null, carrier_id: null as number | null, element_id: null as number | null, console_channel: '', dca: '', iem_mix: '', is_spare: false });
 
@@ -78,6 +80,8 @@
   }
 </script>
 
+{#if checklist && show}<ShowModeChecklist onclose={() => (checklist = false)} />{/if}
+
 <div class="cols">
   <section class="panel grid">
     <h2>Shows</h2>
@@ -91,11 +95,15 @@
       <label>Call time (battery checks due after this)
         <input type="datetime-local" value={toLocal(s.call_time)} onchange={(e) => store.act(() => patch(`/api/shows/${s.id}`, { call_time: fromLocal((e.currentTarget as HTMLInputElement).value) }))} />
       </label>
-      <label>Mode
-        <select value={s.mode} onchange={(e) => store.act(() => patch(`/api/shows/${s.id}`, { mode: (e.currentTarget as HTMLSelectElement).value }))}>
-          <option value="setup">setup</option><option value="rehearsal">rehearsal</option><option value="show">show</option>
-        </select>
-      </label>
+      <div class="grid modes">
+        <span class="muted small">Mode</span>
+        <div class="row">
+          {#each ['setup', 'rehearsal'] as const as m (m)}
+            <button class:primary={s.mode === m} onclick={() => store.act(() => patch(`/api/shows/${s.id}`, { mode: m }))}>{m}</button>
+          {/each}
+          <button class:danger={s.mode === 'show'} onclick={() => (s.mode === 'show' ? null : (checklist = true))} data-testid="enter-show-mode">{s.mode === 'show' ? 'SHOW MODE' : 'Enter show mode…'}</button>
+        </div>
+      </div>
       <div class="row">
         <button onclick={duplicate}>Duplicate as template</button>
         <button class="ghost" onclick={() => confirm(`Delete show "${s.name}"?`) && store.act(() => del(`/api/shows/${s.id}`)).then(() => store.selectShow(null))}>Delete show</button>
@@ -128,7 +136,7 @@
 
     <section class="panel grid wide">
       <h2>Kits · {show.kits.length}</h2>
-      <form class="row" onsubmit={addKit}>
+      <form class="row" onsubmit={addKit} inert={store.showMode} class:locked={store.showMode}>
         <label>Type<select bind:value={kit.kind}><option value="mic">Mic</option><option value="iem">IEM</option><option value="guitar">Guitar</option></select></label>
         <label>Name *<input bind:value={kit.name} placeholder="Vox 5" /></label>
         <label>Receiver / TX ch<select bind:value={kit.base_id}><option value={null}>—</option>{#each opts(SLOTS[kit.kind].base) as e (e.id)}<option value={e.id}>{e.label}</option>{/each}</select></label>
@@ -157,7 +165,7 @@
                 <td>{store.label(k.base_id)}</td>
                 <td>{store.label(k.carrier_id)}</td>
                 <td>{k.element_id ? store.label(k.element_id) : ''}</td>
-                <td><button class="ghost" onclick={() => confirm(`Delete kit ${k.name}? Its assignments are removed too.`) && store.act(() => del(`/api/kits/${k.id}`))}>Delete</button></td>
+                <td><button class="ghost" disabled={store.showMode} onclick={() => confirm(`Delete kit ${k.name}? Its assignments are removed too.`) && store.act(() => del(`/api/kits/${k.id}`))}>Delete</button></td>
               </tr>
             {/each}
           </tbody>
@@ -178,6 +186,9 @@
   .pc { display: flex; align-items: center; gap: 4px; }
   .pc input { width: 70px; }
   .chk { display: flex; align-items: center; gap: 6px; }
+  .locked { opacity: 0.4; }
+  .modes .small { font-size: 0.85rem; }
+  .modes button { text-transform: capitalize; }
   .chk input { min-height: auto; }
   @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
 </style>

@@ -6,11 +6,13 @@
   import Backstage from './views/Backstage.svelte';
   import Foh from './views/Foh.svelte';
   import Admin from './views/Admin.svelte';
+  import Report from './views/Report.svelte';
+  import SwapBanner from './components/SwapBanner.svelte';
 
-  type Route = 'backstage' | 'foh' | 'admin' | 'login';
+  type Route = 'backstage' | 'foh' | 'admin' | 'login' | 'report';
   function parse(): Route {
     const h = location.hash.replace(/^#\/?/, '').split('?')[0];
-    return (['backstage', 'foh', 'admin', 'login'] as Route[]).includes(h as Route) ? (h as Route) : 'backstage';
+    return (['backstage', 'foh', 'admin', 'login', 'report'] as Route[]).includes(h as Route) ? (h as Route) : 'backstage';
   }
   let route = $state<Route>(parse());
   $effect(() => {
@@ -20,15 +22,18 @@
   });
 
   // Ask for an operator first (unless just viewing the login screen).
-  const needsLogin = $derived(store.loaded && !store.operatorName);
+  const needsLogin = $derived(store.loaded && (!store.operatorName || store.needsPin));
 </script>
 
 {#if !store.loaded}
   <div class="loading muted">Connecting to RF Ops server…</div>
 {:else if needsLogin || route === 'login'}
   <Login />
+{:else if route === 'report'}
+  <Report />
 {:else}
   <TopBar {route} />
+  <SwapBanner />
   <main>
     {#if route === 'foh'}
       <Foh />

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { store } from '../../lib/store.svelte';
-  import { del, patch, post } from '../../lib/api';
+  import { del, patch, post, put } from '../../lib/api';
   import type { Role } from '../../lib/types';
 
   let pf = $state({ name: '', role: '', zone: '', owner_user_id: null as number | null });
@@ -15,6 +15,18 @@
     const ok = await store.act(() => post('/api/performers', { ...pf, zone: pf.zone || null }), `Added ${pf.name}`);
     if (ok) pf.name = '';
   }
+  async function setPin(id: number, name: string, clear = false) {
+    let pin: string | null = null;
+    if (!clear) {
+      pin = prompt(`New PIN for ${name} (4–8 digits)`);
+      if (pin === null) return;
+      if (!/^[0-9]{4,8}$/.test(pin)) return store.toast('PIN must be 4–8 digits', 'error');
+    }
+    const ok = await store.act(() => put(`/api/users/${id}/pin`, { pin }), clear ? `PIN removed for ${name}` : `PIN set for ${name}`);
+    // Changing your own PIN signs you out everywhere, including here.
+    if (ok && name === store.operatorName) store.needsPin = true;
+  }
+
   async function addUser(e: SubmitEvent) {
     e.preventDefault();
     const ok = await store.act(() => post('/api/users', uf), `Added operator ${uf.name}`);
@@ -66,14 +78,26 @@
         <button class="primary" type="submit" disabled={!uf.name.trim()}>Add</button>
       </form>
     {/if}
-    <ul>{#each users as u (u.id)}<li>{u.name} <span class="pill">{u.role}</span></li>{/each}</ul>
+    <ul class="ops">
+      {#each users as u (u.id)}
+        <li class="row">
+          <span class="grow">{u.name} <span class="pill">{u.role}</span> {#if u.has_pin}🔒{/if}</span>
+          {#if store.isAdmin || u.name === store.operatorName}
+            <button class="ghost" onclick={() => setPin(u.id, u.name)}>{u.has_pin ? 'Change PIN' : 'Set PIN'}</button>
+            {#if u.has_pin}<button class="ghost" onclick={() => setPin(u.id, u.name, true)}>Remove</button>{/if}
+          {/if}
+        </li>
+      {/each}
+    </ul>
+    <p class="muted small">Operators with a PIN must sign in with it on each screen. Without a PIN anyone can pick that name.</p>
   </section>
 </div>
 
 <style>
   .cols { display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap: 12px; align-items: start; }
   .grid { display: grid; gap: 10px; }
-  ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+  .ops { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+  .small { font-size: 0.85rem; margin: 0; }
   td input { min-width: 100px; }
   @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
 </style>

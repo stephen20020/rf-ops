@@ -100,7 +100,7 @@
               {#each [null, ...songs.map((s) => s.id)] as song (song ?? 'd')}
                 {@const v = value(p.id, song)}
                 <td class:inherit={v === 'inherit'} class:none={v === 'none'} class:bad={conflicted.get(String(song ?? 'd'))?.has(p.id)}>
-                  <select value={v} disabled={!store.canEdit} onchange={(e) => set(p.id, song, (e.currentTarget as HTMLSelectElement).value)} aria-label="{p.name} {song == null ? 'default' : store.songTitle(song)}">
+                  <select value={v} disabled={!store.canEdit || store.showMode} onchange={(e) => set(p.id, song, (e.currentTarget as HTMLSelectElement).value)} aria-label="{p.name} {song == null ? 'default' : store.songTitle(song)}">
                     {#if song != null}<option value="inherit">↳ {inheritedLabel(p.id)}</option>{/if}
                     <option value="none">— none —</option>
                     {#if v === 'multi'}<option value="multi" disabled>{multiLabel(p.id, song)}</option>{/if}

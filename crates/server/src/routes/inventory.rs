@@ -268,7 +268,10 @@ pub struct User {
     pub id: i64,
     pub name: String,
     pub role: String,
+    pub has_pin: bool,
 }
+
+pub(crate) const USER_COLUMNS: &str = "id, name, role, pin_hash IS NOT NULL AS has_pin";
 
 #[derive(Debug, Deserialize)]
 pub struct NewUser {
@@ -276,11 +279,11 @@ pub struct NewUser {
     pub role: Option<String>,
 }
 
-const ROLES: [&str; 4] = ["admin", "a2", "foh", "viewer"];
+pub(crate) const ROLES: [&str; 4] = ["admin", "a2", "foh", "viewer"];
 
 async fn list_users(State(s): State<AppState>) -> ApiResult<Json<Vec<User>>> {
     Ok(Json(
-        sqlx::query_as::<_, User>("SELECT id, name, role FROM users ORDER BY name")
+        sqlx::query_as::<_, User>(&format!("SELECT {USER_COLUMNS} FROM users ORDER BY name"))
             .fetch_all(&s.pool)
             .await?,
     ))
@@ -312,6 +315,7 @@ async fn create_user(
         id,
         name: n.name.trim().into(),
         role,
+        has_pin: false,
     };
     log_event(&mut tx, &actor, "user.created", &user).await?;
     tx.commit().await?;

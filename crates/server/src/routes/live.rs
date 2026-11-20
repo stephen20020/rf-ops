@@ -12,9 +12,9 @@ use sqlx::FromRow;
 use crate::{
     db::{log_event, now, Actor},
     error::{ApiError, ApiResult},
-    hub::{max_seq, ws_handler},
+    hub::{max_seq, ws_handler, Event},
     routes::{
-        inventory::{Equipment, Performer, User},
+        inventory::{Equipment, Performer, User, USER_COLUMNS},
         ops::{compute_battery_status, Alert, BatteryStatus, Checkout},
         shows::{
             conflict_report, fetch_show, load_plan, Assignment, ConflictReport, Kit, Show, Song,
@@ -57,6 +57,8 @@ pub struct ShowSnapshot {
     handoffs_done: Vec<HandoffDone>,
     conflicts: ConflictReport,
     battery: Vec<BatteryStatus>,
+    /// Swaps in the last 10 minutes, newest first (for the FOH banner after a reconnect).
+    recent_swaps: Vec<Event>,
 }
 
 #[derive(Serialize)]
@@ -85,9 +87,10 @@ async fn snapshot(
 ) -> ApiResult<Json<Snapshot>> {
     let pool = &s.pool;
     let seq = max_seq(pool).await?;
-    let users = sqlx::query_as::<_, User>("SELECT id, name, role FROM users ORDER BY name")
-        .fetch_all(pool)
-        .await?;
+    let users =
+        sqlx::query_as::<_, User>(&format!("SELECT {USER_COLUMNS} FROM users ORDER BY name"))
+            .fetch_all(pool)
+            .await?;
     let performers = sqlx::query_as::<_, Performer>("SELECT * FROM performers ORDER BY name")
         .fetch_all(pool)
         .await?;
@@ -129,6 +132,16 @@ async fn snapshot(
             .await?;
             let battery = compute_battery_status(pool, id, None).await?;
             let conflicts = conflict_report(&plan);
+            let since = (chrono::Utc::now() - chrono::Duration::minutes(10))
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            let recent_swaps = sqlx::query_as::<_, Event>(
+                "SELECT * FROM event_log WHERE type = 'swap.performed' AND at >= ?
+                 AND json_extract(payload, '$.show_id') = ? ORDER BY seq DESC LIMIT 20",
+            )
+            .bind(since)
+            .bind(id)
+            .fetch_all(pool)
+            .await?;
             Some(ShowSnapshot {
                 effective: assign::effective_assignment(&assignments, current),
                 next_effective: next_song_id
@@ -139,6 +152,7 @@ async fn snapshot(
                 handoffs_done,
                 conflicts,
                 battery,
+                recent_swaps,
                 show: plan.show,
                 songs: plan.songs,
                 kits: plan.kits,

@@ -24,12 +24,13 @@
       {/each}
     </select>
     {#if store.show}
-      <span class="pill" class:warn={store.show.show.mode === 'show'}>{store.show.show.mode}</span>
+      <span class="pill" class:crit={store.showMode} data-testid="mode">{store.showMode ? 'SHOW MODE' : store.show.show.mode}</span>
     {/if}
     <span class="conn pill" class:ok={store.connected} class:crit={!store.connected} data-testid="connection">
       {#if store.connected}● Live{:else}● Offline · {store.staleSeconds}s stale{/if}
     </span>
     <a class="op" href="#/login" title="Change operator">{store.operatorName}{store.user ? ` · ${store.user.role}` : ''}</a>
+    <button class="ghost small" onclick={() => store.logout()}>Sign out</button>
   </div>
 </header>
 
@@ -45,4 +46,5 @@
   .right { margin-left: auto; }
   select { max-width: 220px; }
   .op { color: var(--muted); text-decoration: none; font-size: 0.9rem; }
+  .small { min-height: 32px; padding: 0 8px; font-size: 0.85rem; }
 </style>
