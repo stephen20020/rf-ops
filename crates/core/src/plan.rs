@@ -792,6 +792,12 @@ impl ShowState {
         out
     }
 
+    /// Plot conflicts in one song (two packs, two mics, element twice, unusable, absent).
+    pub fn conflicts_for(&self, song: Id, chains: &BTreeMap<Id, Chain>) -> Vec<Conflict> {
+        let v = self.current_visit().map(|x| x.no).unwrap_or(1);
+        self.song_conflicts(song, v, chains)
+    }
+
     fn song_conflicts(&self, song: Id, v: u32, chains: &BTreeMap<Id, Chain>) -> Vec<Conflict> {
         let mut out = Vec::new();
         let phases = chains.values().map(|c| c.holders.len()).max().unwrap_or(1);
