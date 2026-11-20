@@ -5,5 +5,6 @@ pub mod assign;
 pub mod battery;
 pub mod midi;
 pub mod model;
+pub mod plan;
 
 pub use model::*;
