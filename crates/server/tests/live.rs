@@ -412,25 +412,57 @@ async fn hf2026_template_is_consistent() {
     assert!(seed::seed_hf2026(&pool).await.unwrap());
     assert!(!seed::seed_hf2026(&pool).await.unwrap());
     let srv = Srv::start_with(pool).await;
-    let show = srv.get("/api/snapshot").await["shows"][0]["id"]
-        .as_i64()
-        .unwrap();
-    let snap = srv.get(&format!("/api/snapshot?show_id={show}")).await;
-    let s = &snap["show"];
-    assert!(
-        s["conflicts"]["by_song"].as_array().unwrap().is_empty(),
-        "shared TX1 must not conflict: {}",
-        s["conflicts"]
-    );
-    let kits = s["kits"].as_array().unwrap();
-    let mics: Vec<_> = kits.iter().filter(|k| k["kind"] == "mic").collect();
-    assert_eq!(mics.len(), 12);
-    let chans: Vec<i64> = mics
+    let shows = srv.get("/api/snapshot").await["shows"].clone();
+    assert_eq!(shows.as_array().unwrap().len(), 2);
+    for show in shows.as_array().unwrap() {
+        let id = show["id"].as_i64().unwrap();
+        let snap = srv.get(&format!("/api/snapshot?show_id={id}")).await;
+        let s = &snap["show"];
+        assert!(
+            s["conflicts"]["by_song"].as_array().unwrap().is_empty(),
+            "{}: {}",
+            show["name"],
+            s["conflicts"]
+        );
+        let kits = s["kits"].as_array().unwrap();
+        let mics: Vec<i64> = kits
+            .iter()
+            .filter(|k| k["kind"] == "mic")
+            .map(|k| k["console_channel"].as_i64().unwrap())
+            .collect();
+        assert_eq!(mics, (33..=44).collect::<Vec<_>>());
+        assert_eq!(kits.iter().filter(|k| k["kind"] == "iem").count(), 12);
+
+        // Helen -> Shosh on RX10 before the handoff song, and back after it.
+        let plan = s["handoff_plan"].as_array().unwrap();
+        let perf = |n: &str| {
+            snap["performers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|p| p["name"] == n)
+                .unwrap()["id"]
+                .clone()
+        };
+        let transfers: Vec<(Value, Value)> = plan
+            .iter()
+            .flat_map(|t| t["handoffs"].as_array().unwrap().clone())
+            .filter(|h| h["type"] == "transfer")
+            .map(|h| (h["from_performer"].clone(), h["to_performer"].clone()))
+            .collect();
+        assert_eq!(
+            transfers,
+            vec![
+                (perf("Helen"), perf("Shosh")),
+                (perf("Shosh"), perf("Helen"))
+            ]
+        );
+    }
+    let names: Vec<&str> = shows
+        .as_array()
+        .unwrap()
         .iter()
-        .map(|k| k["console_channel"].as_i64().unwrap())
+        .map(|s| s["name"].as_str().unwrap())
         .collect();
-    assert_eq!(chans, (33..=44).collect::<Vec<_>>());
-    assert_eq!(mics[0]["name"], "Yellow");
-    assert_eq!(mics[11]["name"], "Bpack4");
-    assert_eq!(kits.iter().filter(|k| k["kind"] == "iem").count(), 9);
+    assert!(names.contains(&"HF Afternoon — Friday") && names.contains(&"HF Afternoon — Saturday"));
 }

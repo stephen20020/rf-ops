@@ -34,8 +34,49 @@ Living document. Confirmed facts come from the owner; everything else is marked 
 - There are two sets (afternoon/evening) with a changeover. The run order isn't set yet.
 - Open item in the plan: RF coordination for the 12 wireless channels.
 
-Template: `rfops-server --seed-hf2026` on an empty database loads this layout. Performer names for
-the colour mics are left blank to fill in.
+## Afternoon IEM & ME-1 (Homestead Fair sheet, Fri/Sat, ME-1 scene 5)
+
+| Person | Pack | Mix |
+|---|---|---|
+| Enoch (drums) | RX1 | ME 1 |
+| Aaron (bass) | RX2 | ME 2 |
+| Drummer 2 | RX3 | ME 1 (shared) |
+| Tim (Nord) | RX4 | ME 4 |
+| Judah (vocal) | RX5 | ME 5 |
+| Drummer 3 | RX6 | ME 1 (shared) |
+| Stephen (choir director) | RX7 | Console mix |
+| Sam (orchestra director) | RX8 | ME 16 |
+| Chandler Moore (Saturday) | RX9 | Console mix |
+| Helen (vocal) | RX10 | ME 3 |
+| David (acoustic/vocal) | Gabe's Shure | ME 10 |
+| Seth (vocal) | Sennheiser 1 | Andrew Taylor's mix (ME unconfirmed) |
+| Josh Patterson (Friday) | Sennheiser 2 | ME 15 (choir wedge) |
+
+- Wired ME-1 users (Jacob perc ME 7, Blair EG2 ME 8, Joel EG3 ME 9, Matthew Garrett synth ME 11,
+  Matthew Taylor B3 ME 12) are outside RF Ops. ME 13/14 are front-line/choir wedges; ME 6 is
+  unassigned.
+- **Handoff:** during "I Will Follow Jesus / Lace Up Your Boots", Shosh takes Helen's RX10. Exact
+  timing and the return are unconfirmed.
+- **Pre-concert:** check pack and mic batteries, RF and audio one hour before. In RF Ops, set the
+  show's call time to concert start minus one hour; battery checks are then due from that time.
+
+Template: `rfops-server --seed-hf2026` on an empty database loads "HF Afternoon — Friday" and
+"HF Afternoon — Saturday" from this sheet. It includes the RX10 handoff, with placeholder
+segments around the handoff song until the run order is set. The 12 colour mics are on Ch 33–44,
+unassigned.
+
+### Afternoon sheet vs. system plan (to resolve)
+
+1. **TX5/RX5:** the plan says TX5 and ME-1 5 are unused; the sheet has Judah on RX5, ME 5.
+2. **RX10:** the plan says TX10 ← ME-1 10 (acoustic); the sheet has Helen on RX10 with ME 3, and
+   David (acoustic) on Gabe's Shure with ME 10.
+3. **RX8:** the plan says TX8 ← St Aux 8 (orchestra director console mix); the sheet has Sam on
+   ME 16.
+4. **ME 6:** the plan says ME-1 6 feeds Andrew's own IEM in the evening; in the afternoon it is
+   unassigned, and Seth is on "Andrew Taylor's mix (ME unconfirmed)".
+5. Which transmitters feed Gabe's Shure, Sennheiser 1 and Sennheiser 2, and are any of these the
+   3 SR IEM G4s?
+6. Does Shosh hand RX10 back to Helen after the song?
 
 ## Operations
 

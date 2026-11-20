@@ -575,10 +575,10 @@ pub async fn seed_demo(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
     Ok(true)
 }
 
-/// Starter template from the HF 2026 dLive system plan: 12 wireless mics named by colour on console
-/// Ch 33–44 (DM64 53–64), IEM transmitters TX1–TX10 fixed to their mix sources, and the console
-/// IEM stations. Performer names for the vocal mics are left for the operator to fill in.
-/// Inserts only into an empty database; returns true when data was inserted.
+/// HF 2026 template from the dLive system plan and the Homestead Fair afternoon IEM & ME-1 sheet:
+/// 12 wireless mics named by colour on console Ch 33–44, IEM packs RX1–RX10 on their transmitters
+/// (RX3 and RX6 share TX1 with RX1), personal/other IEM packs, and two afternoon shows (Friday and
+/// Saturday) including Helen → Shosh's RX10 handoff. Inserts only into an empty database.
 pub async fn seed_hf2026(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
     let existing: Option<i64> = sqlx::query_scalar("SELECT id FROM equipment LIMIT 1")
         .fetch_optional(pool)
@@ -633,7 +633,7 @@ pub async fn seed_hf2026(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
             .await?;
     }
 
-    // IEM: TX1–TX10 (Sennheiser; XSW vs SR IEM G4 split to confirm), packs RX1–RX10.
+    // IEM transmitters TX1–TX10 and packs RX1–RX10 (XSW vs SR IEM G4 split to confirm).
     for i in 1..=10 {
         s.simple(
             "iem_tx_channel",
@@ -650,7 +650,23 @@ pub async fn seed_hf2026(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
         )
         .await?;
     }
-    // Guitar wireless in inventory; which guitarists use them is to confirm.
+    // Other packs on the afternoon sheet; their transmitters aren't documented yet.
+    for (label, make, note) in [
+        (
+            "Gabe's Shure",
+            "Shure",
+            "Personal pack (Gabe). Transmitter TBC.",
+        ),
+        ("Sennheiser 1", "Sennheiser", "Transmitter TBC."),
+        ("Sennheiser 2", "Sennheiser", "Transmitter TBC."),
+    ] {
+        s.simple("iem_pack", make, "IEM pack", label).await?;
+        sqlx::query("UPDATE equipment SET notes = ? WHERE label = ?")
+            .bind(note)
+            .bind(label)
+            .execute(&mut *s.tx)
+            .await?;
+    }
     for (label, model) in [
         ("GLXD6-1", "GLXD6 Z2"),
         ("GLXD6-2", "GLXD6 Z2"),
@@ -666,21 +682,31 @@ pub async fn seed_hf2026(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
         s.simple("guitar_pack", "Shure", model, label).await?;
     }
 
-    let show = sqlx::query("INSERT INTO shows (name, mode) VALUES ('HF 2026', 'setup')")
-        .execute(&mut *s.tx)
-        .await?
-        .last_insert_rowid();
-    // Run order isn't set yet; segments stand in until it is.
-    for (i, title) in ["Afternoon set", "Changeover", "Evening set"]
-        .iter()
-        .enumerate()
-    {
-        sqlx::query("INSERT INTO songs (show_id, position, title) VALUES (?, ?, ?)")
-            .bind(show)
-            .bind(i as i64 + 1)
-            .bind(*title)
+    // People on wireless IEM in the afternoon (wired ME-1 users are outside RF Ops).
+    let mut perf = HashMap::new();
+    for (name, role) in [
+        ("Enoch", "Drums"),
+        ("Aaron", "Bass"),
+        ("Drummer 2", "Drums"),
+        ("Tim", "Nord"),
+        ("Judah", "Vocal"),
+        ("Drummer 3", "Drums"),
+        ("Stephen", "Choir Director"),
+        ("Sam", "Orchestra Director"),
+        ("Chandler Moore", "Guest (Saturday)"),
+        ("Helen", "Vocal"),
+        ("Shosh", "Vocal"),
+        ("David", "Acoustic / Vocal"),
+        ("Seth", "Vocal"),
+        ("Josh Patterson", "Guest (Friday)"),
+    ] {
+        let id = sqlx::query("INSERT INTO performers (name, role) VALUES (?, ?)")
+            .bind(name)
+            .bind(role)
             .execute(&mut *s.tx)
-            .await?;
+            .await?
+            .last_insert_rowid();
+        perf.insert(name, id);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -689,7 +715,7 @@ pub async fn seed_hf2026(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
         show: i64,
         kind: &str,
         name: &str,
-        base: &str,
+        base: Option<&str>,
         carrier: &str,
         ch: Option<i64>,
         mix: Option<&str>,
@@ -701,7 +727,7 @@ pub async fn seed_hf2026(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
         .bind(show)
         .bind(kind)
         .bind(name)
-        .bind(s.eq[base])
+        .bind(base.map(|b| s.eq[b]))
         .bind(s.eq[carrier])
         .bind(ch)
         .bind(ch.map(|_| name.to_owned()))
@@ -711,71 +737,135 @@ pub async fn seed_hf2026(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
         .last_insert_rowid())
     }
 
-    // Wireless mics on console Ch 33–44, in fader-bank order (Layer A bank 1).
-    let packs: Vec<String> = COLOURS
-        .iter()
-        .map(|c| c.to_string())
-        .chain((1..=4).map(|i| format!("Bpack{i}")))
-        .collect();
-    for (i, pack) in packs.iter().enumerate() {
-        let rx = format!("ULXD-{}/{}", i / 4 + 1, i % 4 + 1);
-        kit(
-            &mut s,
-            show,
-            "mic",
-            pack,
-            &rx,
-            pack,
-            Some(33 + i as i64),
-            None,
-        )
-        .await?;
-    }
-
-    // IEM: transmitters stay fixed; only the people change. RX1, RX3 and RX6 all listen to TX1.
-    let iem = [
-        ("TX1 Drums · RX1", "TX1", "RX1", "ME-1 1 (drums)"),
-        ("TX1 Drums · RX3", "TX1", "RX3", "ME-1 1 (drums)"),
-        ("TX1 Drums · RX6", "TX1", "RX6", "ME-1 1 (drums)"),
-        ("TX2 Bass · RX2", "TX2", "RX2", "ME-1 2 (bass)"),
-        ("TX4 Nord · RX4", "TX4", "RX4", "ME-1 4 (Nord)"),
-        ("TX7 · RX7", "TX7", "RX7", "St Aux 7 (Choir Dir)"),
-        ("TX8 · RX8", "TX8", "RX8", "St Aux 8 (Orch Dir)"),
-        ("TX9 Chandler · RX9", "TX9", "RX9", "St Aux 9 (Chandler)"),
-        ("TX10 Acoustic · RX10", "TX10", "RX10", "ME-1 10 (acoustic)"),
-    ];
-    let mut iem_kits = HashMap::new();
-    for (name, tx, rx, mix) in iem {
-        iem_kits.insert(
-            name,
-            kit(&mut s, show, "iem", name, tx, rx, None, Some(mix)).await?,
-        );
-    }
-
-    // Stations with a known IEM feed. Names are roles until the crew list is in.
-    for (performer, role, kit_name) in [
-        ("Drums", "Band", "TX1 Drums · RX1"),
-        ("Bass", "Band", "TX2 Bass · RX2"),
-        ("Keys (Nord)", "Band", "TX4 Nord · RX4"),
-        ("Acoustic", "Band", "TX10 Acoustic · RX10"),
-        ("Choir Director", "Directors", "TX7 · RX7"),
-        ("Orchestra Director", "Directors", "TX8 · RX8"),
-        ("Chandler Moore", "Guest", "TX9 Chandler · RX9"),
-    ] {
-        let p = sqlx::query("INSERT INTO performers (name, role) VALUES (?, ?)")
-            .bind(performer)
-            .bind(role)
+    let handoff_song = "I Will Follow Jesus / Lace Up Your Boots";
+    for day in ["Friday", "Saturday"] {
+        let show = sqlx::query("INSERT INTO shows (name, mode) VALUES (?, 'setup')")
+            .bind(format!("HF Afternoon — {day}"))
             .execute(&mut *s.tx)
             .await?
             .last_insert_rowid();
-        sqlx::query(
-            "INSERT INTO assignments (show_id, performer_id, kind, kit_id) VALUES (?, ?, 'iem', ?)",
-        )
-        .bind(show)
-        .bind(p)
-        .bind(iem_kits[kit_name])
-        .execute(&mut *s.tx)
-        .await?;
+        // Run order isn't set yet: the handoff song sits between placeholders.
+        let mut songs = HashMap::new();
+        for (i, title) in [
+            "Concert (before handoff)",
+            handoff_song,
+            "Concert (after handoff)",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let id = sqlx::query("INSERT INTO songs (show_id, position, title) VALUES (?, ?, ?)")
+                .bind(show)
+                .bind(i as i64 + 1)
+                .bind(*title)
+                .execute(&mut *s.tx)
+                .await?
+                .last_insert_rowid();
+            songs.insert(*title, id);
+        }
+
+        // Wireless mics on console Ch 33–44, in fader-bank order. Who sings on which colour is TBC.
+        let packs: Vec<String> = COLOURS
+            .iter()
+            .map(|c| c.to_string())
+            .chain((1..=4).map(|i| format!("Bpack{i}")))
+            .collect();
+        for (i, pack) in packs.iter().enumerate() {
+            let rx = format!("ULXD-{}/{}", i / 4 + 1, i % 4 + 1);
+            kit(
+                &mut s,
+                show,
+                "mic",
+                pack,
+                Some(&rx),
+                pack,
+                Some(33 + i as i64),
+                None,
+            )
+            .await?;
+        }
+
+        // Afternoon IEM sheet (ME-1 scene 5).
+        let mut iem: Vec<(&str, &str, Option<&str>, &str, &str)> = vec![
+            ("Enoch", "RX1 · ME 1", Some("TX1"), "RX1", "ME 1"),
+            ("Aaron", "RX2 · ME 2", Some("TX2"), "RX2", "ME 2"),
+            (
+                "Drummer 2",
+                "RX3 · ME 1",
+                Some("TX1"),
+                "RX3",
+                "ME 1 (shared)",
+            ),
+            ("Tim", "RX4 · ME 4", Some("TX4"), "RX4", "ME 4"),
+            ("Judah", "RX5 · ME 5", Some("TX5"), "RX5", "ME 5"),
+            (
+                "Drummer 3",
+                "RX6 · ME 1",
+                Some("TX1"),
+                "RX6",
+                "ME 1 (shared)",
+            ),
+            (
+                "Stephen",
+                "RX7 · console",
+                Some("TX7"),
+                "RX7",
+                "Console mix (St Aux 7)",
+            ),
+            ("Sam", "RX8 · ME 16", Some("TX8"), "RX8", "ME 16"),
+            ("Helen", "RX10 · ME 3", Some("TX10"), "RX10", "ME 3"),
+            (
+                "David",
+                "Gabe's Shure · ME 10",
+                None,
+                "Gabe's Shure",
+                "ME 10",
+            ),
+            (
+                "Seth",
+                "Sennheiser 1 · Andrew T mix",
+                None,
+                "Sennheiser 1",
+                "Andrew Taylor's mix (ME TBC)",
+            ),
+        ];
+        match day {
+            "Saturday" => iem.push((
+                "Chandler Moore",
+                "RX9 · console",
+                Some("TX9"),
+                "RX9",
+                "Console mix (St Aux 9)",
+            )),
+            _ => iem.push((
+                "Josh Patterson",
+                "Sennheiser 2 · ME 15",
+                None,
+                "Sennheiser 2",
+                "ME 15 (choir wedge)",
+            )),
+        }
+        for (person, name, tx, pack, mix) in iem {
+            let k = kit(&mut s, show, "iem", name, tx, pack, None, Some(mix)).await?;
+            sqlx::query("INSERT INTO assignments (show_id, performer_id, kind, kit_id) VALUES (?, ?, 'iem', ?)")
+                .bind(show)
+                .bind(perf[person])
+                .bind(k)
+                .execute(&mut *s.tx)
+                .await?;
+            if person == "Helen" {
+                // Shosh takes Helen's RX10 for the handoff song; return afterwards is assumed (TBC).
+                for (p, kit_id) in [(perf["Helen"], None), (perf["Shosh"], Some(k))] {
+                    sqlx::query("INSERT INTO assignments (show_id, performer_id, kind, kit_id, song_id) VALUES (?, ?, 'iem', ?, ?)")
+                        .bind(show)
+                        .bind(p)
+                        .bind(kit_id)
+                        .bind(songs[handoff_song])
+                        .execute(&mut *s.tx)
+                        .await?;
+                }
+            }
+        }
     }
 
     let actor = Actor {
@@ -783,13 +873,7 @@ pub async fn seed_hf2026(pool: &SqlitePool) -> Result<bool, sqlx::Error> {
         client_id: None,
         role: None,
     };
-    log_event(
-        &mut s.tx,
-        &actor,
-        "seed.hf2026",
-        &serde_json::json!({ "show_id": show }),
-    )
-    .await?;
+    log_event(&mut s.tx, &actor, "seed.hf2026", &serde_json::json!({})).await?;
     s.tx.commit().await?;
     Ok(true)
 }
