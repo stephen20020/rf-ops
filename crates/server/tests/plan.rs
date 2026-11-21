@@ -449,3 +449,36 @@ async fn preshow_checklist_ticks_itself_and_report_tells_the_story() {
     assert_eq!(r["batteries"]["counts"]["ok"], 3);
     assert!(r["attention"].to_string().contains("suspect"), "Red is suspect after the swap: {r}");
 }
+
+#[tokio::test]
+async fn reset_after_rehearsal_clears_the_run_and_allows_reimport() {
+    let t = T::new().await;
+    let (_, v) = t.yaml("/api/showfile/import", SWAP_SHOW).await;
+    let show = v["show_id"].as_i64().unwrap();
+    t.done(show, "coming_up", "Red").await;
+    let one = t.song(show, "One").await;
+    t.go(show, one).await;
+    let red = dev_id(&t, show, "Red").await;
+    let bp = dev_id(&t, show, "Bpack3").await;
+    let (_, sw) = t.json("POST", &format!("/api/shows/{show}/swaps"), Some(json!({ "failed": red, "replacement": bp }))).await;
+    t.json("POST", &format!("/api/swaps/{}/in-hand", sw["id"]), None).await;
+    // Removing a played song is refused, and the message points at reset.
+    let without = SWAP_SHOW.replace("  - { title: One }\n", "");
+    let (st, v) = t.yaml("/api/showfile/import", &without).await;
+    assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(v["errors"][0]["message"].as_str().unwrap().contains("reset the run"), "{v}");
+
+    let (st, v) = t.json("POST", &format!("/api/shows/{show}/reset-run"), None).await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+    let b = t.board(show).await;
+    assert!(b["board"]["current_song"].is_null());
+    let tile = |l: &str| b["devices"].as_array().unwrap().iter().find(|d| d["label"] == l).unwrap().clone();
+    assert_eq!(tile("Red")["holder"]["kind"], "stock");
+    assert_eq!(tile("Bpack3")["holder"]["kind"], "stock");
+    assert_ne!(tile("Red")["usage"]["usage"], "suspect", "back in service");
+    let (_, swaps) = t.json("GET", &format!("/api/shows/{show}/swaps"), None).await;
+    assert!(swaps.as_array().unwrap().is_empty());
+    // Now the song can be removed.
+    let (st, v) = t.yaml("/api/showfile/import", &without).await;
+    assert_eq!(st, StatusCode::OK, "{v}");
+}

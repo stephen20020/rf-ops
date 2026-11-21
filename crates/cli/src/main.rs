@@ -5,6 +5,7 @@
 //! rfops show check  FILE.yaml              check a show file (changes nothing)
 //! rfops show import FILE.yaml [--dry-run]  create or update the show
 //! rfops show export "Show name" [-o FILE]  write a show out as a file
+//! rfops show reset  "Show name"            clear a rehearsal/test run (the plan is kept)
 //! ```
 //!
 //! Server: `--server URL` or `RFOPS_SERVER` (default http://localhost:8080).
@@ -45,6 +46,7 @@ const USAGE: &str = "usage:
   rfops show check  FILE.yaml
   rfops show import FILE.yaml [--dry-run]
   rfops show export \"Show name\" [-o FILE.yaml]
+  rfops show reset  \"Show name\"
 options: --server URL (or RFOPS_SERVER), --name NAME (or RFOPS_NAME)";
 
 fn fail(msg: &str) -> ExitCode {
@@ -106,6 +108,17 @@ fn shows(o: &Opts) -> Result<Vec<Value>, String> {
         .map_err(|e| e.to_string())
 }
 
+fn find_show(o: &Opts, which: &str) -> Result<i64, String> {
+    if let Ok(id) = which.parse::<i64>() {
+        return Ok(id);
+    }
+    shows(o)?
+        .iter()
+        .find(|s| s["name"].as_str() == Some(which))
+        .and_then(|s| s["id"].as_i64())
+        .ok_or_else(|| format!("no show called \"{which}\" (try: rfops shows)"))
+}
+
 fn main() -> ExitCode {
     let o = opts();
     let a: Vec<&str> = o.args.iter().map(String::as_str).collect();
@@ -140,6 +153,23 @@ fn main() -> ExitCode {
                     if had_errors { ExitCode::from(1) } else { ExitCode::SUCCESS }
                 }
                 Err(e) => fail(&e),
+            }
+        }
+        ["show", "reset", which] => {
+            let id = match find_show(&o, which) {
+                Ok(id) => id,
+                Err(e) => return fail(&e),
+            };
+            let r = ureq::post(&format!("{}/api/shows/{id}/reset-run", o.server))
+                .set("x-rfops-actor", &header_name(&o.name))
+                .call();
+            match r {
+                Ok(resp) => {
+                    let v: Value = resp.into_json().unwrap_or(Value::Null);
+                    println!("Reset \"{which}\": run cleared, {} device(s) back to stock. The plan is unchanged.", v["devices_to_stock"]);
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(&format!("reset failed: {e}")),
             }
         }
         ["show", "export", which, rest @ ..] => {

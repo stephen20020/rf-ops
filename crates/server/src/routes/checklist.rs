@@ -26,6 +26,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/shows/{id}/checklist/custom", post(add_custom))
         .route("/api/checklist/custom/{cid}", delete(delete_custom))
         .route("/api/shows/{id}/post-show", get(report))
+        .route("/api/shows/{id}/reset-run", post(reset_run))
 }
 
 /// Manual items, in order. Keys are stable (ticks are stored by key).
@@ -250,6 +251,49 @@ async fn delete_custom(State(s): State<AppState>, actor: Actor, Path(cid): Path<
     log_event(&mut tx, &actor, "checklist.item_removed", &json!({ "id": cid })).await?;
     tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------------------------------------------------------------- reset after a rehearsal
+
+/// Clear a show's run (after a rehearsal or a test): songs played, passes done, swaps, "leave it"s,
+/// checklist ticks, show mode; devices go back to stock. The plan, people, devices, battery checks
+/// and the event log are kept. A pinned backup is taken first.
+async fn reset_run(State(s): State<AppState>, actor: Actor, Path(id): Path<Id>) -> ApiResult<Json<Value>> {
+    let (st, _) = plan_store::load(&s.pool, id).await?;
+    if let Some(Err(e)) = s.backup_now("before-reset").await {
+        tracing::warn!(error = %e, "backup before reset failed");
+    }
+    let mut tx = s.pool.begin().await?;
+    // Devices a test swap marked suspect go back in service (before the swaps are cleared).
+    sqlx::query("UPDATE devices SET status = 'ok' WHERE status = 'suspect' AND id IN (SELECT failed_id FROM substitutions WHERE show_id = ?)")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    for q in [
+        "DELETE FROM pass_marks WHERE pass_id IN (SELECT id FROM passes WHERE show_id = ?)",
+        "DELETE FROM song_visits WHERE show_id = ?",
+        "DELETE FROM substitutions WHERE show_id = ?",
+        "DELETE FROM handoff_left WHERE show_id = ?",
+        "DELETE FROM checklist_ticks WHERE show_id = ?",
+        "UPDATE shows SET current_song_id = NULL, mode = 'setup', activated_at = NULL, ended_at = NULL WHERE id = ?",
+    ] {
+        sqlx::query(q).bind(id).execute(&mut *tx).await?;
+    }
+    let mut moved = 0;
+    for d in &st.devices {
+        if st.holding(d.id).holder != Holder::Stock {
+            moved += sqlx::query("UPDATE holdings SET holder_kind = 'stock', performer_id = NULL, tuned_base_id = NULL, since = ?, by_name = ? WHERE device_id = ?")
+                .bind(now())
+                .bind(&actor.name)
+                .bind(d.id)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
+        }
+    }
+    log_event(&mut tx, &actor, "show.run_reset", &json!({ "show_id": id, "devices_to_stock": moved })).await?;
+    tx.commit().await?;
+    Ok(Json(json!({ "show_id": id, "devices_to_stock": moved })))
 }
 
 // ---------------------------------------------------------------- post-show report

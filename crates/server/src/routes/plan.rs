@@ -476,7 +476,7 @@ async fn showfile_import(
                 Json(problems_json(&[showfile::Problem {
                     level: Level::Error,
                     at: "songs".into(),
-                    message: format!("\"{title}\" was already played in this show, so it can't be removed. Keep it in the file with skip: true."),
+                    message: format!("\"{title}\" was already played in this show, so it can't be removed. If that was only a rehearsal or test, reset the run first (rfops show reset \"<show>\", or Pre-show → Reset after rehearsal); otherwise keep it in the file with skip: true."),
                 }])),
             ).into_response());
         }

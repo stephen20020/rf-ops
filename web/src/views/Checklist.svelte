@@ -34,6 +34,10 @@
     const ok = await store.act(() => patch(`/api/shows/${store.showId}`, { mode: 'show' }), 'Show mode on');
     if (ok !== undefined) location.hash = '#/board';
   }
+  async function resetRun() {
+    if (!confirm("Reset after rehearsal?\n\nClears songs played, passes done, swaps, checklist ticks and show mode, and puts devices back in stock. The plan, people and battery checks are kept. A backup is taken first.")) return;
+    await store.act(() => post(`/api/shows/${store.showId}/reset-run`), 'Run reset: ready for the real show');
+  }
   async function end() {
     if (!confirm('End the show? (Show mode off. Checks after this count for the next show.)')) return;
     await store.act(() => patch(`/api/shows/${store.showId}`, { mode: 'rehearsal' }), 'Show ended');
@@ -78,6 +82,7 @@
       {:else}
         <button class="primary big" onclick={start} data-testid="start-show">Start show (show mode)</button>
       {/if}
+      <button class="ghost" onclick={resetRun} data-testid="reset-run">Reset after rehearsal</button>
     </div>
   {:else}
     <p class="muted">Loading…</p>
