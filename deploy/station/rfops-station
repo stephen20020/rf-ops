@@ -1,0 +1,66 @@
+#!/bin/sh
+# RF Ops stage station: full-screen board that stays on.
+#   rfops-station                       open the board (asks for the address the first time)
+#   rfops-station --url https://rfops.example.com    set the RF Ops address
+#   rfops-station --autostart on|off    start the station when this user logs in
+set -u
+CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rfops"
+CONF="$CONF_DIR/station.conf"
+mkdir -p "$CONF_DIR"
+
+case "${1:-}" in
+  --url)
+    [ -n "${2:-}" ] || { echo "usage: rfops-station --url https://rfops.example.com" >&2; exit 2; }
+    printf 'RFOPS_URL=%s\n' "${2%/}" > "$CONF"
+    echo "Saved: $2"; exit 0 ;;
+  --autostart)
+    mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
+    if [ "${2:-}" = "off" ]; then
+      rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/autostart/rfops-station.desktop"; echo "Autostart off"
+    else
+      cp /usr/share/rfops/rfops-station-autostart.desktop "${XDG_CONFIG_HOME:-$HOME/.config}/autostart/rfops-station.desktop"
+      echo "Autostart on: the station opens when you log in"
+    fi
+    exit 0 ;;
+  --help|-h) sed -n '2,5p' "$0"; exit 0 ;;
+esac
+
+RFOPS_URL=""
+[ -f "$CONF" ] && . "$CONF"
+if [ -z "$RFOPS_URL" ]; then
+  if command -v zenity >/dev/null 2>&1; then
+    RFOPS_URL=$(zenity --entry --title "RF Ops station" --text "RF Ops address (e.g. https://rfops.example.com):" 2>/dev/null) || exit 1
+  else
+    printf 'RF Ops address (e.g. https://rfops.example.com): '; read -r RFOPS_URL
+  fi
+  RFOPS_URL="${RFOPS_URL%/}"
+  [ -n "$RFOPS_URL" ] || exit 1
+  printf 'RFOPS_URL=%s\n' "$RFOPS_URL" > "$CONF"
+fi
+
+# Keep the screen on.
+if command -v xset >/dev/null 2>&1; then xset s off -dpms s noblank 2>/dev/null || true; fi
+command -v gsettings >/dev/null 2>&1 && {
+  gsettings set org.gnome.desktop.session idle-delay 0 2>/dev/null
+  gsettings set org.gnome.desktop.screensaver lock-enabled false 2>/dev/null
+} || true
+
+BROWSER=""
+for b in chromium chromium-browser google-chrome google-chrome-stable microsoft-edge; do
+  command -v "$b" >/dev/null 2>&1 && { BROWSER="$b"; break; }
+done
+if [ -z "$BROWSER" ]; then
+  echo "Install Chromium first: sudo apt install chromium (or chromium-browser)" >&2
+  command -v zenity >/dev/null 2>&1 && zenity --error --text "Install Chromium first: sudo apt install chromium" 2>/dev/null
+  exit 1
+fi
+
+# The station keeps its own profile (its name and settings stay put) and reopens if closed.
+PROFILE="$CONF_DIR/browser"
+while true; do
+  "$BROWSER" --kiosk --app="$RFOPS_URL/#/board" --user-data-dir="$PROFILE" \
+    --noerrdialogs --disable-session-crashed-bubble --disable-infobars --no-first-run \
+    --disable-background-timer-throttling --disable-backgrounding-occluded-windows \
+    --disable-renderer-backgrounding --overscroll-history-navigation=0 --check-for-update-interval=31536000
+  sleep 2
+done

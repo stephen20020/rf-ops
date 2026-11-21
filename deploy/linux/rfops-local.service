@@ -1,0 +1,19 @@
+# Optional: run an RF Ops server on this machine (offline/rehearsal use). Production runs on Render.
+# Enable: sudo systemctl enable --now rfops-local
+[Unit]
+Description=RF Ops server (local)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+DynamicUser=yes
+StateDirectory=rfops
+Environment=RFOPS_DB=sqlite:///var/lib/rfops/rfops.db
+Environment=RFOPS_ADDR=0.0.0.0:8080
+Environment=RFOPS_WEB=/usr/share/rfops/web
+ExecStart=/usr/bin/rfops-server
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

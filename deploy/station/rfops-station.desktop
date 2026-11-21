@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=RF Ops Station
+Comment=Full-screen RF Ops board for the stage
+Exec=rfops-station
+Icon=audio-input-microphone
+Terminal=false
+Categories=AudioVideo;Audio;

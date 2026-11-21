@@ -12,3 +12,26 @@ path = "src/main.rs"
 [dependencies]
 ureq = { version = "2.12", default-features = false, features = ["json", "tls"] }
 serde_json.workspace = true
+
+# Linux installer: `cargo deb -p rfops-cli` (after `cargo build --release` and `npm run build` in web/).
+[package.metadata.deb]
+name = "rfops"
+maintainer = "RF Ops"
+copyright = "RF Ops"
+extended-description = """\
+RF Ops stage station (full-screen board that stays on: rfops-station), the rfops show-file \
+command, and an optional local RF Ops server (rfops-local service, off by default)."""
+depends = "$auto"
+recommends = "chromium | chromium-browser, zenity, x11-xserver-utils"
+section = "sound"
+priority = "optional"
+assets = [
+    ["target/release/rfops", "usr/bin/", "755"],
+    ["target/release/rfops-server", "usr/bin/", "755"],
+    ["../../deploy/station/rfops-station", "usr/bin/", "755"],
+    ["../../deploy/station/rfops-station.desktop", "usr/share/applications/", "644"],
+    ["../../deploy/station/rfops-station-autostart.desktop", "usr/share/rfops/", "644"],
+    ["../../deploy/linux/rfops-local.service", "lib/systemd/system/", "644"],
+    ["../../web/dist/**/*", "usr/share/rfops/web/", "644"],
+    ["../../docs/show-files.md", "usr/share/doc/rfops/", "644"],
+]
