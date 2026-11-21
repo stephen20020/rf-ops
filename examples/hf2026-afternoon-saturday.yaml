@@ -1,7 +1,7 @@
 # HF 2026 afternoon, Saturday. From the Homestead Fair afternoon IEM & ME-1 sheet (latest owner
 # document). Load it with:  rfops show import examples/hf2026-afternoon-saturday.yaml
-# Run order and mic list from the owner (Nov 2026). PC numbers aren't set yet: add `pc:` to each
-# song to match the Program Change cues in Playback.
+# Run order and mic list from the owner (Nov 2026). No Playback cues: songs are advanced by hand
+# (▶ on the board).
 
 show: HF Afternoon — Saturday
 event: Homestead Fair 2026
@@ -22,7 +22,7 @@ people:
   - { name: David, notes: "Acoustic / vocal. On Gabe's Shure pack, ME 10" }
   - { name: Seth, notes: "Vocal. Sennheiser 1, Andrew Taylor's mix (ME TBC)" }
   - { name: Josh Patterson, notes: "Guest. Sennheiser 2, ME 15 (choir wedge)" }
-  - { name: Chandler Moore, notes: "Guest (Saturday). RX9, console mix. Blue for the last 3 songs." }
+  - { name: Chandler Moore, notes: "Guest (Saturday). RX9, console mix. Sings the last 3 songs alone, on Blue." }
   - { name: Didi, notes: Vocal }
   - { name: Blair, notes: "Speaker" }
   - { name: Keith, notes: "God Did (no wireless listed)" }
@@ -79,7 +79,7 @@ songs:
   - { title: Awesome God, notes: "Seth" }
   - { title: Joy, notes: "Judah" }
   - { title: It's A Beautiful Day, notes: "Kids" }
-  - { title: Don't Forget to Remember, notes: "Kids" }
+  - { title: What a Wonderful World, notes: "Kids" }
   - { title: Jesus is the Lord, notes: "Kids" }
   - { title: God Did, notes: "Transition. Josh P, David, Keith" }
   - { title: My Jesus I Love Thee, notes: "Helen" }
@@ -87,9 +87,9 @@ songs:
     notes: "Shosh / Judah Jacobson. Shosh takes Helen's RX10 for this song."
     passes:
       - "RX10: Helen -> Shosh"
-  - { title: Firm Foundation, notes: "Stephen, Helen" }
-  - { title: God I'm Just Grateful, notes: "Josh P" }
-  - { title: Praise, notes: "Judah / Helen / Didi" }
+  - { title: Firm Foundation, notes: "Saturday: Chandler only" }
+  - { title: God I'm Just Grateful, notes: "Saturday: Chandler only" }
+  - { title: Praise, notes: "Saturday: Chandler only" }
 
 plot:
   default:
@@ -99,7 +99,7 @@ plot:
     Red: Judah          # Ch 34 (Seth has it for Awesome God)
     Blue: Josh Patterson   # Ch 35 (Stephen has it for Firm Foundation)
     Green: Helen        # Ch 36
-    Black: Chandler Moore      # Ch 37
+    Black: nobody       # not used Saturday      # Ch 37
     White: Blair        # Ch 38 (Speaker)
     Orange: Didi        # Ch 39
     Tan: nobody         # Ch 40
@@ -126,12 +126,26 @@ plot:
     RX9: Chandler Moore
   Awesome God:
     Red: Seth
+  # Saturday: only Chandler sings the last 3 songs, on Blue (Josh passes it to him).
+  # Everyone else's mic is collected before Firm Foundation.
   Firm Foundation:
     Blue: Chandler Moore
-    Black: nobody       # Chandler moves to Blue for the last 3 songs
+    Yellow: nobody
+    Red: nobody
+    Green: nobody
+    Orange: nobody
+    White: nobody
   God I'm Just Grateful:
     Blue: Chandler Moore
-    Black: nobody
+    Yellow: nobody
+    Red: nobody
+    Green: nobody
+    Orange: nobody
+    White: nobody
   Praise:
     Blue: Chandler Moore
-    Black: nobody
+    Yellow: nobody
+    Red: nobody
+    Green: nobody
+    Orange: nobody
+    White: nobody

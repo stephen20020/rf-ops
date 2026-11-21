@@ -1,7 +1,7 @@
 # HF 2026 afternoon, Friday. From the Homestead Fair afternoon IEM & ME-1 sheet (latest owner
 # document). Load it with:  rfops show import examples/hf2026-afternoon-friday.yaml
-# Run order and mic list from the owner (Nov 2026). PC numbers aren't set yet: add `pc:` to each
-# song to match the Program Change cues in Playback.
+# Run order and mic list from the owner (Nov 2026). No Playback cues: songs are advanced by hand
+# (▶ on the board).
 
 show: HF Afternoon — Friday
 event: Homestead Fair 2026
@@ -77,7 +77,7 @@ songs:
   - { title: Awesome God, notes: "Seth" }
   - { title: Joy, notes: "Judah" }
   - { title: It's A Beautiful Day, notes: "Kids" }
-  - { title: Don't Forget to Remember, notes: "Kids" }
+  - { title: What a Wonderful World, notes: "Kids" }
   - { title: Jesus is the Lord, notes: "Kids" }
   - { title: God Did, notes: "Transition. Josh P, David, Keith" }
   - { title: My Jesus I Love Thee, notes: "Helen" }
