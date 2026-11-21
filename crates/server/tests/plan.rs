@@ -226,8 +226,20 @@ async fn hf2026_example_file_imports_on_the_hf_seed() {
     let b = t.board(show).await;
     let rx3 = b["devices"].as_array().unwrap().iter().find(|d| d["label"] == "RX3").unwrap().clone();
     assert_eq!(rx3["kind"], "iem");
-    // Pre-show: 12 packs to give out.
-    assert_eq!(b["board"]["coming_up"].as_array().unwrap().len(), 12, "{}", b["board"]["coming_up"]);
+    // Pre-show: 6 mics (Seth has Red for Awesome God) + 12 IEM packs to give out.
+    assert_eq!(b["board"]["coming_up"].as_array().unwrap().len(), 18, "{}", b["board"]["coming_up"]);
+    assert!(b["board"]["conflicts"].as_array().unwrap().is_empty());
+    // Red goes from Seth to Judah between Awesome God and Joy.
+    t.done(show, "coming_up", "Red").await;
+    let ag = t.song(show, "Awesome God").await;
+    t.go(show, ag).await;
+    let b = t.board(show).await;
+    assert!(b["board"]["coming_up"].to_string().contains("\"type\":\"pass\""), "{}", b["board"]["coming_up"]);
+    // Saturday imports too (Chandler on Blue for the last 3 songs).
+    let sat = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/hf2026-afternoon-saturday.yaml")).unwrap();
+    let (st, v) = t.yaml("/api/showfile/import", &sat).await;
+    assert!(st.is_success(), "{v}");
+    assert!(v["warnings"].as_array().unwrap().is_empty(), "{v}");
 }
 
 const SWAP_SHOW: &str = r#"
@@ -373,7 +385,7 @@ async fn hf2026_example_imports_on_a_demo_database_too() {
     let b = t.board(show).await;
     let tile = |l: &str| b["devices"].as_array().unwrap().iter().find(|d| d["label"] == l).cloned();
     assert!(tile("Red").is_some() && tile("GLXD1+-1").is_some());
-    assert_eq!(b["board"]["coming_up"].as_array().unwrap().len(), 12, "{}", b["board"]["coming_up"]);
+    assert_eq!(b["board"]["coming_up"].as_array().unwrap().len(), 18, "{}", b["board"]["coming_up"]);
     // Importing again changes nothing new (idempotent).
     let (st, v) = t.yaml("/api/showfile/import", &file).await;
     assert_eq!(st, StatusCode::OK, "{v}");

@@ -1,6 +1,7 @@
 # HF 2026 afternoon, Friday. From the Homestead Fair afternoon IEM & ME-1 sheet (latest owner
 # document). Load it with:  rfops show import examples/hf2026-afternoon-friday.yaml
-# Song list is a placeholder until the run order is final: edit the titles and pc numbers.
+# Run order and mic list from the owner (Nov 2026). PC numbers aren't set yet: add `pc:` to each
+# song to match the Program Change cues in Playback.
 
 show: HF Afternoon — Friday
 event: Homestead Fair 2026
@@ -21,6 +22,9 @@ people:
   - { name: David, notes: "Acoustic / vocal. On Gabe's Shure pack, ME 10" }
   - { name: Seth, notes: "Vocal. Sennheiser 1, Andrew Taylor's mix (ME TBC)" }
   - { name: Josh Patterson, notes: "Guest. Sennheiser 2, ME 15 (choir wedge)" }
+  - { name: Didi, notes: Vocal }
+  - { name: Blair, notes: "Speaker" }
+  - { name: Keith, notes: "God Did (no wireless listed)" }
 
 # Every device this show uses. Devices RF Ops already has are left as they are; new ones are
 # added, and so are any transmitters / receiver channels it doesn't have yet. So this file
@@ -70,14 +74,41 @@ mixes:
   TX10: ME 3
 
 songs:
-  - { title: Concert (before handoff) }
-  - title: I Will Follow Jesus / Lace Up Your Boots
+  - { title: Awesome God, notes: "Seth" }
+  - { title: Joy, notes: "Judah" }
+  - { title: It's A Beautiful Day, notes: "Kids" }
+  - { title: Don't Forget to Remember, notes: "Kids" }
+  - { title: Jesus is the Lord, notes: "Kids" }
+  - { title: God Did, notes: "Transition. Josh P, David, Keith" }
+  - { title: My Jesus I Love Thee, notes: "Helen" }
+  - title: I Will Follow Jesus
+    notes: "Shosh / Judah Jacobson. Shosh takes Helen's RX10 for this song."
     passes:
       - "RX10: Helen -> Shosh"
-  - { title: Concert (after handoff) }
+  - { title: Firm Foundation, notes: "Stephen, Helen" }
+  - { title: God I'm Just Grateful, notes: "Josh P" }
+  - { title: Praise, notes: "Judah / Helen / Didi" }
 
 plot:
   default:
+    # Wireless mics (owner's mic list). Everyone keeps their own mic for the whole show;
+    # shared mics change hands per song below.
+    Yellow: Shosh       # Ch 33
+    Red: Judah          # Ch 34 (Seth has it for Awesome God)
+    Blue: Josh Patterson   # Ch 35 (Stephen has it for Firm Foundation)
+    Green: Helen        # Ch 36
+    Black: nobody         # Ch 37
+    White: Blair        # Ch 38 (Speaker)
+    Orange: Didi        # Ch 39
+    Tan: nobody         # Ch 40
+    Bpack1: nobody      # Ch 41
+    Bpack2: nobody      # Ch 42
+    Bpack3: nobody      # Ch 43
+    Bpack4: nobody      # Ch 44
+    GLXD1-1: nobody     # guitar (Z2)
+    GLXD1-2: nobody     # guitar (Z2)
+    GLXD1+-1: nobody    # guitar (Z3, 5.8 GHz band)
+    # IEM packs (afternoon IEM & ME-1 sheet).
     RX1: Enoch
     RX2: Aaron
     RX3: Drummer 2
@@ -90,20 +121,7 @@ plot:
     Gabe's Shure: David
     Sennheiser 1: Seth
     Sennheiser 2: Josh Patterson
-    # Wireless mics, console Ch 33–44. Who sings on which colour is still TBC in the documents:
-    # replace "nobody" with a name from people (or set them in Admin → Plot).
-    Yellow: nobody     # Ch 33
-    Red: nobody        # Ch 34
-    Blue: nobody       # Ch 35
-    Green: nobody      # Ch 36
-    Black: nobody      # Ch 37
-    White: nobody      # Ch 38
-    Orange: nobody     # Ch 39
-    Tan: nobody        # Ch 40
-    Bpack1: nobody     # Ch 41
-    Bpack2: nobody     # Ch 42
-    Bpack3: nobody     # Ch 43
-    Bpack4: nobody     # Ch 44
-    GLXD1-1: nobody    # guitar (Z2)
-    GLXD1-2: nobody    # guitar (Z2)
-    GLXD1+-1: nobody   # guitar (Z3, 5.8 GHz band)
+  Awesome God:
+    Red: Seth
+  Firm Foundation:
+    Blue: Stephen

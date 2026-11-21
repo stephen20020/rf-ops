@@ -1,0 +1,137 @@
+# HF 2026 afternoon, Saturday. From the Homestead Fair afternoon IEM & ME-1 sheet (latest owner
+# document). Load it with:  rfops show import examples/hf2026-afternoon-saturday.yaml
+# Run order and mic list from the owner (Nov 2026). PC numbers aren't set yet: add `pc:` to each
+# song to match the Program Change cues in Playback.
+
+show: HF Afternoon — Saturday
+event: Homestead Fair 2026
+timezone: America/Chicago
+set: afternoon
+
+people:
+  - { name: Enoch, notes: Drums }
+  - { name: Aaron, notes: Bass }
+  - { name: Drummer 2, notes: Drums }
+  - { name: Tim, notes: Nord }
+  - { name: Judah, notes: Vocal }
+  - { name: Drummer 3, notes: Drums }
+  - { name: Stephen, notes: Choir director }
+  - { name: Sam, notes: Orchestra director }
+  - { name: Helen, notes: Vocal }
+  - { name: Shosh, notes: Vocal }
+  - { name: David, notes: "Acoustic / vocal. On Gabe's Shure pack, ME 10" }
+  - { name: Seth, notes: "Vocal. Sennheiser 1, Andrew Taylor's mix (ME TBC)" }
+  - { name: Josh Patterson, notes: "Guest. Sennheiser 2, ME 15 (choir wedge)" }
+  - { name: Chandler Moore, notes: "Guest (Saturday). RX9, console mix. Blue for the last 3 songs." }
+  - { name: Didi, notes: Vocal }
+  - { name: Blair, notes: "Speaker" }
+  - { name: Keith, notes: "God Did (no wireless listed)" }
+
+# Every device this show uses. Devices RF Ops already has are left as they are; new ones are
+# added, and so are any transmitters / receiver channels it doesn't have yet. So this file
+# imports into any RF Ops database.
+devices:
+  # Wireless mics on console Ch 33–44 (3x ULXD4Q = 12 receiver channels).
+  - { label: Yellow, kind: mic, channel: "33", base: ULXD-1/1 }
+  - { label: Red, kind: mic, channel: "34", base: ULXD-1/2 }
+  - { label: Blue, kind: mic, channel: "35", base: ULXD-1/3 }
+  - { label: Green, kind: mic, channel: "36", base: ULXD-1/4 }
+  - { label: Black, kind: mic, channel: "37", base: ULXD-2/1 }
+  - { label: White, kind: mic, channel: "38", base: ULXD-2/2 }
+  - { label: Orange, kind: mic, channel: "39", base: ULXD-2/3 }
+  - { label: Tan, kind: mic, channel: "40", base: ULXD-2/4 }
+  - { label: Bpack1, kind: mic, channel: "41", base: ULXD-3/1 }
+  - { label: Bpack2, kind: mic, channel: "42", base: ULXD-3/2 }
+  - { label: Bpack3, kind: mic, channel: "43", base: ULXD-3/3 }
+  - { label: Bpack4, kind: mic, channel: "44", base: ULXD-3/4 }
+  # IEM packs on their transmitters (RX3 and RX6 share TX1 with RX1).
+  - { label: RX1, kind: iem, base: TX1 }
+  - { label: RX2, kind: iem, base: TX2 }
+  - { label: RX3, kind: iem, base: TX1 }
+  - { label: RX4, kind: iem, base: TX4 }
+  - { label: RX5, kind: iem, base: TX5 }
+  - { label: RX6, kind: iem, base: TX1 }
+  - { label: RX7, kind: iem, base: TX7 }
+  - { label: RX8, kind: iem, base: TX8 }
+  - { label: RX9, kind: iem, base: TX9 }
+  - { label: RX10, kind: iem, base: TX10 }
+  # Packs whose transmitter isn't documented yet (TBC).
+  - { label: Gabe's Shure, kind: iem }
+  - { label: Sennheiser 1, kind: iem }
+  - { label: Sennheiser 2, kind: iem }
+  # Guitar wireless: packs with their receivers (who plays which guitar is TBC).
+  - { label: GLXD1-1, kind: guitar, base: GLXD6-1 }
+  - { label: GLXD1-2, kind: guitar, base: GLXD6-2 }
+  - { label: GLXD1+-1, kind: guitar, base: GLXD6+-1 }
+
+# IEM transmitter → ME-1 mix for this show. RX1, RX3 and RX6 all listen to TX1.
+mixes:
+  TX1: ME 1
+  TX2: ME 2
+  TX4: ME 4
+  TX5: ME 5
+  TX7: Console mix
+  TX8: ME 16
+  TX9: Console mix
+  TX10: ME 3
+
+songs:
+  - { title: Awesome God, notes: "Seth" }
+  - { title: Joy, notes: "Judah" }
+  - { title: It's A Beautiful Day, notes: "Kids" }
+  - { title: Don't Forget to Remember, notes: "Kids" }
+  - { title: Jesus is the Lord, notes: "Kids" }
+  - { title: God Did, notes: "Transition. Josh P, David, Keith" }
+  - { title: My Jesus I Love Thee, notes: "Helen" }
+  - title: I Will Follow Jesus
+    notes: "Shosh / Judah Jacobson. Shosh takes Helen's RX10 for this song."
+    passes:
+      - "RX10: Helen -> Shosh"
+  - { title: Firm Foundation, notes: "Stephen, Helen" }
+  - { title: God I'm Just Grateful, notes: "Josh P" }
+  - { title: Praise, notes: "Judah / Helen / Didi" }
+
+plot:
+  default:
+    # Wireless mics (owner's mic list). Everyone keeps their own mic for the whole show;
+    # shared mics change hands per song below.
+    Yellow: Shosh       # Ch 33
+    Red: Judah          # Ch 34 (Seth has it for Awesome God)
+    Blue: Josh Patterson   # Ch 35 (Stephen has it for Firm Foundation)
+    Green: Helen        # Ch 36
+    Black: Chandler Moore      # Ch 37
+    White: Blair        # Ch 38 (Speaker)
+    Orange: Didi        # Ch 39
+    Tan: nobody         # Ch 40
+    Bpack1: nobody      # Ch 41
+    Bpack2: nobody      # Ch 42
+    Bpack3: nobody      # Ch 43
+    Bpack4: nobody      # Ch 44
+    GLXD1-1: nobody     # guitar (Z2)
+    GLXD1-2: nobody     # guitar (Z2)
+    GLXD1+-1: nobody    # guitar (Z3, 5.8 GHz band)
+    # IEM packs (afternoon IEM & ME-1 sheet).
+    RX1: Enoch
+    RX2: Aaron
+    RX3: Drummer 2
+    RX4: Tim
+    RX5: Judah
+    RX6: Drummer 3
+    RX7: Stephen
+    RX8: Sam
+    RX10: Helen
+    Gabe's Shure: David
+    Sennheiser 1: Seth
+    Sennheiser 2: Josh Patterson   # TBC: is Josh here on Saturday?
+    RX9: Chandler Moore
+  Awesome God:
+    Red: Seth
+  Firm Foundation:
+    Blue: Chandler Moore
+    Black: nobody       # Chandler moves to Blue for the last 3 songs
+  God I'm Just Grateful:
+    Blue: Chandler Moore
+    Black: nobody
+  Praise:
+    Blue: Chandler Moore
+    Black: nobody
