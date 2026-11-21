@@ -46,8 +46,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Build rfops.exe
         run: cargo build --release --locked -p rfops-cli
-      - name: WiX 3
-        run: choco install wixtoolset --version 3.14.1 -y --no-progress
+      - name: WiX 3 (preinstalled on the runner; install if missing)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\WiX Toolset v3.14\bin\candle.exe")) {
+            choco install wixtoolset -y --no-progress
+          }
       - name: Package .msi
         shell: pwsh
         run: |
